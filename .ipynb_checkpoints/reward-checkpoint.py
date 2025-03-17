@@ -104,3 +104,46 @@ from typing import List, Set, Tuple
 #         reward += 100.0
         
 #     return reward
+
+def compute_reward(num_agents, old_positions, agent_positions, evacuated_agents, deactivated_agents, goal_area):
+    """
+    Compute rewards for all agents based on their actions and outcomes.
+    
+    Args:
+        num_agents (int): Number of agents in the environment
+        old_positions (list): Previous positions of all agents
+        agent_positions (list): Current positions of all agents
+        evacuated_agents (set): Set of indices of agents that have reached the goal
+        deactivated_agents (set): Set of indices of agents that have been deactivated
+        goal_area (list): List of goal positions for each agent
+        
+    Returns:
+        Tuple[np.ndarray, Set]: Rewards for each agent and updated evacuated_agents set
+    """
+    rewards = np.zeros(num_agents)
+    
+    # Start with a copy of evacuated_agents to track newly evacuated agents
+    evacuated_agents_copy = evacuated_agents.copy()
+
+    # Compute reward for each agent
+    for i, (old_pos, new_pos) in enumerate(zip(old_positions, agent_positions)):
+        if i in evacuated_agents:
+            continue
+        elif i in deactivated_agents:   # Penalties for each deactivated agent
+            rewards[i] = -100.0
+        elif tuple(new_pos) in goal_area:   # One-time reward for each agent reaching the goal
+            rewards[i] = 1000.0
+            evacuated_agents_copy.add(i)
+        else:
+            # Compute distance-based reward
+            goal_pos = goal_area[i]
+            old_dist = np.linalg.norm(np.array(old_pos) - np.array(goal_pos))
+            new_dist = np.linalg.norm(np.array(new_pos) - np.array(goal_pos))
+            
+            # Reward for moving closer to goal, penalize for moving away
+            distance_reward = old_dist - new_dist
+            
+            # Small penalty for each step to encourage efficiency
+            rewards[i] = distance_reward * 2.0 - 0.1
+    
+    return rewards, evacuated_agents_copy
