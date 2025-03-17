@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from agent import MyAgent
+from agentqmix import MyAgent
 from env import MazeEnv
 
 
@@ -118,7 +118,7 @@ def train(config_path: str) -> MyAgent:
             total_reward += np.sum(rewards)
 
             # Update agent policy
-            done = terminated or truncated
+            done = terminated or truncated or (total_reward < -1000)
             agent.update_policy(actions, state, rewards, next_state, done)
             state = next_state
 
