@@ -58,7 +58,7 @@ class MyAgent:
         self.tau = 0.005
         self.epsilon = 1.0
         self.epsilon_min = 1e-2
-        self.epsilon_decay = 0.995
+        self.epsilon_decay = 0.9995
 
         self.hidden_size = 64
         self.layer_sizes = [
@@ -77,7 +77,7 @@ class MyAgent:
         self.optimizers = [optim.AdamW(m.parameters(), self.lr) for m in self.models]
 
     def get_action(self, state: list, evaluation: bool = False):
-        if evaluation:
+        if not evaluation:
             self.update_epsilon()
 
         actions = []
@@ -104,7 +104,7 @@ class MyAgent:
         actions = torch.tensor(actions, dtype=torch.int64, device=self.device)
         state = state_to_tensor(state, self.device)
         reward = torch.tensor(reward, device=self.device)
-        next_state = state_to_tensor(state, self.device)
+        next_state = state_to_tensor(next_state, self.device)
         done = torch.tensor(done, dtype=torch.int8, device=self.device)
         self.buffer.append(state, actions, reward, next_state, done)
 

@@ -29,6 +29,6 @@ def compute_reward(
             distance_to_goal = abs(min_x_goal - new_pos[0]) + abs(
                 min_y_goal - new_pos[1]
             )
-            rewards[i] = -0.1 - distance_to_goal
+            rewards[i] = -0.1 - distance_to_goal / 100
 
     return rewards, evacuated_agents
