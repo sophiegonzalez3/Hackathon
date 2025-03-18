@@ -1,0 +1,12 @@
+{
+    "grid_size": 16,
+    "walls_proportion": 0.25,
+    "num_dynamic_obstacles": 2,
+    "num_agents": 4,
+    "communication_range": 6,
+    "max_lidar_dist_main": 5,
+    "max_lidar_dist_second": 2,
+    "max_episodes": 10,
+    "max_episode_steps": 50,
+    "render_mode": "human"
+}

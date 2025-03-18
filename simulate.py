@@ -112,7 +112,7 @@ def train(config_path: str) -> MyAgent:
                   f"Deactivated: {len(info['deactivated_agents'])}", end='')
             
             # Pause
-            time.sleep(1)
+            # time.sleep(1)
             
             # If the episode is terminated
             if terminated or truncated:
