@@ -2,11 +2,10 @@ import gymnasium as gym
 import numpy as np
 import pygame
 import math
-import time
 from gymnasium import spaces
 from collections import deque
 from typing import Tuple, List, Set, Optional, Union, Dict
-from reward import compute_reward, a_star
+from reward import compute_reward
 
 class MazeEnv(gym.Env):
 
@@ -331,32 +330,16 @@ class MazeEnv(gym.Env):
         
         info = {'seed': self.seed_value}
         
-        static_info = static_info = {
-            'grid': self.grid,
-            'walls': self.walls,
-            'goal_area': self.goal_area,
-            'grid_size': self.grid_size
-            }
-
         if self.render_mode == "human":
-            optimal = self.compute_optimal_paths(static_info)
-            #print(optimal)
             self._render_frame()
-            self.render_paths(optimal)
-            time.sleep(5)
-
         
         return state, info
 
 
     def get_reward(self, old_positions: list):
-        
         rewards, evacuated_agents = compute_reward(self.num_agents, old_positions,
                                                    self.agent_positions, self.evacuated_agents, 
-                                                   self.deactivated_agents, self.goal_area,
-                                                   self.grid,
-                                                   self.walls
-                                                   )
+                                                   self.deactivated_agents, self.goal_area)
         if evacuated_agents != self.evacuated_agents:
             self.evacuated_agents = evacuated_agents    
 
@@ -365,8 +348,6 @@ class MazeEnv(gym.Env):
 
     def step(self, actions):
         self.current_step += 1
-        with open('reward_log.txt', 'a') as log_file:
-            log_file.write(f"\n#### \n Step {self.current_step}: Reward CALL\n ####\n")
         
         # Store the actual state for reward computation
         old_positions = [pos.copy() for pos in self.agent_positions]
@@ -544,94 +525,6 @@ class MazeEnv(gym.Env):
         self.seed_value = seed
         np.random.seed(seed)
         return [seed]
-
-    def compute_optimal_paths(self, static_info):
-        """
-        Compute optimal paths for all agents at the beginning of an episode.
-        
-        Args:
-            env: The environment instance
-            static_info: Dictionary containing static environment info
-            
-        Returns:
-            dict: Dictionary mapping agent indices to their optimal paths
-        """
-        optimal_paths = {}
-        
-        grid = static_info['grid']
-        walls = static_info['walls']
-        goal_area = static_info['goal_area']
-        
-        # For each agent, compute optimal path to the closest goal
-        for i, pos in enumerate(self.agent_positions):
-            if i in self.evacuated_agents or i in self.deactivated_agents:
-                continue
-                
-            # Find closest goal
-            closest_goal = min(goal_area, key=lambda g: abs(pos[0] - g[0]) + abs(pos[1] - g[1]))
-            
-            # Compute A* path
-            _, _, full_path = a_star(grid, pos, closest_goal, walls)
-            
-            # Store path for this agent
-            optimal_paths[i] = full_path
-            
-            # Log the path
-            with open('path_log.txt', 'a') as log_file:
-                log_file.write(f"\n----- Episode Path for Agent {i} -----\n")
-                log_file.write(f"Start: {pos}, Goal: {closest_goal}\n")
-                log_file.write(f"Path length: {len(full_path)}\n")
-                log_file.write(f"Full path: {full_path}\n")
-                log_file.write("----- End of Path -----\n")
-    
-        return optimal_paths
-
-    def render_paths(self, optimal_paths):
-        """
-        Extend the environment's render function to visualize optimal paths.
-        Should be called after the environment's regular render method.
-        
-        Args:
-            env: The environment instance
-            optimal_paths: Dictionary mapping agent indices to their optimal paths
-        """
-        if self.render_mode != "human" or not hasattr(self, 'window'):
-            return
-        
-        # Create a surface for path visualization
-        path_surface = pygame.Surface((self.screen_size, self.screen_size), pygame.SRCALPHA)
-        
-        # Draw paths for each agent
-        for agent_idx, path in optimal_paths.items():
-            if agent_idx in self.evacuated_agents or agent_idx in self.deactivated_agents:
-                continue
-                
-            # Get agent color
-            agent_color = self.colors['agents'][agent_idx % len(self.colors['agents'])]
-            
-            # Create a semi-transparent version of the agent color for the path
-            path_color = (*agent_color[:3], 128)  # Add alpha channel for transparency
-            
-            # Draw each segment of the path
-            for i in range(len(path) - 1):
-                start_pos = path[i]
-                end_pos = path[i + 1]
-                
-                # Convert grid positions to screen coordinates (center of cells)
-                start_x = int(start_pos[1] * self.cell_size + self.cell_size // 2)
-                start_y = int(start_pos[0] * self.cell_size + self.cell_size // 2)
-                end_x = int(end_pos[1] * self.cell_size + self.cell_size // 2)
-                end_y = int(end_pos[0] * self.cell_size + self.cell_size // 2)
-                
-                # Draw line for path segment
-                pygame.draw.line(path_surface, path_color, (start_x, start_y), (end_x, end_y), 2)
-                
-                # Draw small circle at each waypoint
-                pygame.draw.circle(path_surface, path_color, (end_x, end_y), 3)
-        
-        # Overlay the path surface onto the main window
-        self.window.blit(path_surface, (0, 0))
-        pygame.display.flip()
 
 
     def generate_city_layout_with_solution(self) -> Set[Tuple[int, int]]:
