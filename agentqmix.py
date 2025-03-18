@@ -6,9 +6,31 @@ import numpy.typing as npt
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
-
+from typing import List, Tuple, Dict, Set
 from buffer import Buffer
 
+def save_tensor_as_markdown(tensor, filename="matrix.md"):
+    """
+    Saves a PyTorch tensor as a markdown-formatted table to a file.
+
+    Args:
+        tensor (torch.Tensor): The PyTorch tensor to be saved.
+        filename (str): The name of the file to save the markdown table (default is 'matrix.md').
+    """
+    # Convert the tensor to a NumPy array
+    matrix = tensor.numpy()
+
+    # Start building the markdown table
+    markdown_table = "| " + " | ".join([f"Col {i+1}" for i in range(matrix.shape[1])]) + " |\n"
+    markdown_table += "|" + " --- |" * matrix.shape[1] + "\n"
+
+    # Add rows of the matrix
+    for row in matrix:
+        markdown_table += "| " + " | ".join(map(str, row)) + " |\n"
+
+    # Write to a .txt or .md file
+    with open(filename, "w") as f:
+        f.write(markdown_table)
 
 def state_to_tensor(state: list, device: torch.device) -> torch.Tensor:
     """Convert state from list of arrays to tensor."""
@@ -36,6 +58,72 @@ def soft_update(model: nn.Module, target_model: nn.Module, tau: float) -> None:
         model.parameters(), target_model.parameters(), strict=True
     ):
         target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
+
+
+def central_state_static(
+    agent_states: torch.Tensor,
+    grid_size: int,
+    walls: Set[Tuple[int, int]],
+    goal_area: List[Tuple[int, int]],
+    optimal_paths: List[Tuple[int, int]], 
+    device: torch.device
+) -> torch.Tensor:
+    """
+    Creates an enhanced central state for QMIX with separate matrices for static and dynamic elements.
+    
+    Args:
+        agent_states: Individual agent states tensor [batch_size, num_agents, state_size]
+        grid_size: Size of the environment grid
+        walls: Set of wall coordinates (x, y)
+        goal_area: List of goal area coordinates (x, y)
+        optimal_paths: List of coordinates (x, y) representing optimal paths from A*
+        device: Torch device
+        
+    Returns:
+        Enhanced central state tensor [batch_size, 2, grid_size, grid_size]
+    """
+    
+    
+    # Fill the static environment matrix (channel 0)
+    MAX_GRID_SIZE = 30
+    needs_padding = grid_size < MAX_GRID_SIZE
+
+    static_matrix = torch.ones((grid_size, grid_size), device=device)  # Default: +1 for neutral
+    
+    # Add walls: -5
+    for wall in walls:
+        static_matrix[wall] = -5
+    
+    # Add goals: +100
+    for goal in goal_area:
+        static_matrix[goal] = 100
+    
+    # Add optimal paths: +2
+    for path_point in optimal_paths:
+        # Only mark if not already a wall or goal
+        if static_matrix[path_point] == 1:
+            static_matrix[path_point] = 2
+
+    if needs_padding:
+        # Create the padded matrix filled with wall values (-5)
+        padded_matrix = torch.full((MAX_GRID_SIZE, MAX_GRID_SIZE), -5, device=device)
+        
+        # Calculate padding offsets (to center the actual grid in the padded one)
+        pad_offset = (MAX_GRID_SIZE - grid_size) // 2
+        
+        # Place the actual grid in the center of the padded grid
+        padded_matrix[
+            pad_offset:pad_offset+grid_size, 
+            pad_offset:pad_offset+grid_size
+        ] = static_matrix
+        
+        # Use the padded matrix
+        static_matrix = padded_matrix
+
+    #save_tensor_as_markdown(static_matrix, "static.md")
+    return static_matrix
+
+
 
 
 class QNet(nn.Module):
@@ -127,9 +215,10 @@ class MyAgent:
         self.num_agents = num_agents
         self.action_low = 0
         self.action_high = 6
+        self.max_grid_size = 30
 
         self.state_size = 10 * num_agents + 2
-        self.central_state_size = num_agents * self.state_size
+        self.central_state_size = num_agents * self.state_size +900
         self.action_size = self.action_high + 1
         self.q_net_hidden_size = 128
         self.mixing_hidden_size = 128
@@ -167,6 +256,7 @@ class MyAgent:
             list(self.q_net.parameters()) + list(self.mixer.parameters()), self.lr
         )
 
+
     def get_action(self, state: list, evaluation: bool = False):
         if not evaluation:
             self.update_epsilon()
@@ -196,11 +286,13 @@ class MyAgent:
         reward: list,
         next_state: list,
         done: bool,
+        env
     ):
         state_ = state_to_tensor(state, self.device)
-        central_state = self.extract_central_state(state_)
+        central_state = self.extract_central_state(state_, env, self.max_grid_size, self.device)
         next_state_ = state_to_tensor(next_state, self.device)
-        next_central_state = self.extract_central_state(next_state_)
+        next_central_state = self.extract_central_state(next_state_, env, self.max_grid_size,  self.device)
+        central_state_static(state, env.grid_size, env.walls, env.goal_area, env.optimal_path, self.device)
 
         self.buffer.append(
             state=state_,
@@ -210,6 +302,7 @@ class MyAgent:
             next_state=state_to_tensor(next_state, self.device),
             next_central_state=next_central_state,
             done=torch.tensor(int(done), device=self.device),
+            
         )
 
         if len(self.buffer) < self.batch_size:
@@ -221,8 +314,17 @@ class MyAgent:
         self.epsilon *= self.epsilon_decay
         self.epsilon = max(self.epsilon, self.epsilon_min)
 
-    def extract_central_state(self, states: torch.Tensor) -> torch.Tensor:
-        return states.flatten()
+    def extract_central_state(self, states: torch.Tensor, env, max_grid_size:int,  device) -> torch.Tensor:
+        batch_size = 1
+        # Create empty central state with 2 channels: static and dynamic
+        central_state = torch.zeros((batch_size, 1, max_grid_size, max_grid_size), device=device)
+        # Broadcast to all batches
+        static_matrix = central_state_static(states, env.grid_size, env.walls, env.goal_area, env.optimal_path, self.device)
+        flattened_static = static_matrix.flatten()
+        flattened_agents = states.flatten()
+        central_state = torch.cat([flattened_static, flattened_agents])
+        return central_state
+
 
     @torch.no_grad()
     def compute_target(
@@ -274,7 +376,8 @@ class MyAgent:
 
         q_values = qs.gather(2, action).squeeze(2)
 
-        # (batch_size, 1)
+        
+             # (batch_size, 1)
         q_tot = self.mixer(q_values, batch.central_state)
 
         self.optimizer.zero_grad()

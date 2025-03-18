@@ -94,137 +94,13 @@ def a_star(grid, start, goal, walls):
     return float("inf"), None, []
 
 
-def compute_reward_star(
-    num_agents,
-    old_positions,
-    agent_positions,
-    evacuated_agents,
-    deactivated_agents,
-    goal_area,
-    grid=None,
-    walls=None,
-    dynamic_obstacles=None,
-):
-    """
-    Improved reward function using A* pathfinding .
-    to improve :
-    * rendre le logging optionnel
-    * pas compute le full path si pas besoin
-
-    Args:
-        num_agents: Number of agents
-        old_positions: Previous positions of agents
-        agent_positions: Current positions of agents
-        evacuated_agents: Set of agents that reached the goal
-        deactivated_agents: Set of deactivated agents
-        goal_area: List of goal positions
-        grid: The environment grid (static information)
-        walls: Set of wall positions (static information)
-        dynamic_obstacles: Not used for A* pathfinding, only included for compatibility
-
-    Returns:
-        rewards: List of rewards for each agent
-        evacuated_agents: Updated set of evacuated agents
-    """
-    # print(walls)
-    # print(grid)
-
-    with open("reward_log.txt", "a") as log_file:
-        log_file.write("\n----- New Reward Computation -----\n")
-        log_file.write(f"Number of agents: {num_agents}\n")
-        log_file.write(f"Agent positions: {agent_positions}\n")
-        log_file.write(f"Evacuated agents: {evacuated_agents}\n")
-        log_file.write(f"Deactivated agents: {deactivated_agents}\n")
-        log_file.write(f"Goal area: {goal_area}\n")
-        log_file.write(f"Grid shape: {grid.shape if grid is not None else 'None'}\n")
-        log_file.write(
-            f"Number of walls: {len(walls) if walls is not None else 'None'}\n"
-        )
-        # Sample of walls (first 5 if available)
-        if walls and len(walls) > 0:
-            sample_walls = list(walls)[: min(5, len(walls))]
-            log_file.write(f"Sample walls: {sample_walls}\n")
-
-    rewards = np.zeros(num_agents)
-
-    # Convert to set for fast lookups
-    if walls is None:
-        walls = set()
-
-    # Compute reward for each agent
-    for i, (old_pos, new_pos) in enumerate(zip(old_positions, agent_positions)):
-        with open("reward_log.txt", "a") as log_file:
-            log_file.write(f"In for loop Agent {i + 1}\n")
-        if i in evacuated_agents:
-            continue
-        elif i in deactivated_agents:
-            # Penalties for each deactivated agent
-            rewards[i] = -100.0
-        elif tuple(new_pos) in goal_area:
-            # Large one-time reward for reaching goal
-            rewards[i] = 1000.0
-            evacuated_agents.add(i)
-        else:
-            # Base penalty for each step
-            rewards[i] = -0.1
-
-            # If we have grid information, use A* to improve reward
-            if grid is not None:
-                # Compute A* path to closest goal using only static information
-                closest_goal = min(
-                    goal_area,
-                    key=lambda g: abs(new_pos[0] - g[0]) + abs(new_pos[1] - g[1]),
-                )
-                old_path_length, _, _ = a_star(grid, old_pos, closest_goal, walls)
-                new_path_length, _, _ = a_star(grid, new_pos, closest_goal, walls)
-
-                # If we moved closer to the goal according to A*
-                if new_path_length < old_path_length:
-                    # Reward is proportional to the progress made
-                    progress = (old_path_length - new_path_length) / max(
-                        1, old_path_length
-                    )
-                    rewards[i] += 10.0 * progress
-
-                    # Log the path improvement
-                    with open("reward_log.txt", "a") as log_file:
-                        log_file.write(
-                            f"Agent {i + 1}: PROGRESS - Old path: {old_path_length}, New path: {new_path_length}, Reward: +{10.0 * progress:.2f}\n"
-                        )
-                elif new_path_length > old_path_length:
-                    # Penalty for moving away from the goal
-                    regress = (new_path_length - old_path_length) / max(
-                        1, old_path_length
-                    )
-                    rewards[i] -= 5.0 * regress
-                    # Log the path regression
-                    with open("reward_log.txt", "a") as log_file:
-                        log_file.write(
-                            f"Agent {i + 1}: REGRESS - Old path: {old_path_length}, New path: {new_path_length}, Penalty: -{5.0 * regress:.2f}\n"
-                        )
-                else:  # on penalise aussi si on reste sur place
-                    rewards[i] -= 1
-                    # Log the path regression
-                    with open("reward_log.txt", "a") as log_file:
-                        log_file.write(f"Agent {i + 1}: REMAINNED IN PLACE\n")
-
-                # Additional reward for being close to the goal (j'aime pas voir pour une implementation non lineaire de l'appreciation de la distance au goal?)
-                if new_path_length <= 3:
-                    rewards[i] += (4 - new_path_length) * 2.0
-                    with open("reward_log.txt", "a") as log_file:
-                        log_file.write(f"Agent {i + 1}: is close to goal\n")
-
-        with open("reward_log.txt", "a") as log_file:
-            log_file.write(f"Agent {i + 1}: Reward : {rewards[i]} \n")
-
-    return rewards, evacuated_agents
-
 
 def l1_distance(pos, goal_area):
-    min_x_goal = min(goal_area[0][0], goal_area[1][0])
-    min_y_goal = min(goal_area[0][1], goal_area[1][1])
-    return abs(min_x_goal - pos[0]) + abs(min_y_goal - pos[1])
-
+    """Calculate Manhattan distance to the closest point in goal area"""
+    if isinstance(goal_area, list):
+        return min(abs(pos[0] - g[0]) + abs(pos[1] - g[1]) for g in goal_area)
+    else:
+        return abs(pos[0] - goal_area[0]) + abs(pos[1] - goal_area[1])
 
 def compute_reward(
     num_agents,
@@ -233,38 +109,106 @@ def compute_reward(
     evacuated_agents,
     deactivated_agents,
     goal_area,
+    com_range
+
 ):
     rewards = np.zeros(num_agents)
-
-    # Compute reward for each agent
+    new_evacuated_agents = evacuated_agents.copy()
+    
+    # Global team reward component - will be added to all active agents
+    team_reward = 0
+    previously_evacuated = len(evacuated_agents)
+    currently_deactivated = len(deactivated_agents)
+    
+    # Parameters - On peut fine tune
+    TIME_STEP_PENALTY = -1  # Penalty for each time step (encourages speed)
+    NOT_MOVING_PENALTY = -2  # Penalty for staying in the same place
+    GOAL_REWARD = 1000.0  # Reward for reaching the goal
+    DEACTIVATION_PENALTY = -100.0  # Penalty for agent deactivation
+    DISTANCE_REWARD_SCALE = 1.1  # Scale factor for distance-based rewards
+    TEAM_SUCCESS_REWARD = 100.0  # Reward for team members when an agent reaches goal
+    TEAM_FAILLURE_REWARD = 10.0  # Reward for team members when an agent reaches goal
+    EVACUATION_BONUS = 50.0 * num_agents  # Bonus that increases with more agents evacuated
+    AGENT_TOO_CLOSE_PENALTY = -3  # Penalty for agents being too close to each other
+    AGENT_MIN_DISTANCE = 1  # Minimum desired distance between agents
+    AGENT_TOO_FAR_PENALTY = -5  # Penalty for being out of communication range
+    COMMUNICATION_RANGE = com_range
+    
+    # Compute per-agent rewards
     for i, (old_pos, new_pos) in enumerate(zip(old_positions, agent_positions)):
+        # Skip already evacuated agents
         if i in evacuated_agents:
             continue
-        elif i in deactivated_agents:  # Penalties for each deactivated agent
-            rewards[i] = -100.0
-        elif (
-            tuple(new_pos) in goal_area
-        ):  # One-time reward for each agent reaching the goal
-            rewards[i] = 1000.0
-            evacuated_agents.add(i)
-        else:
-            # penalty for being slow
-            time_step_penalty = -0.1
+            
+        # Handle deactivated agents
+        if i in deactivated_agents:
+            rewards[i] = DEACTIVATION_PENALTY
+            # Penalize the whole team slightly when an agent is deactivated
+            team_reward -= TEAM_FAILLURE_REWARD
+            continue
+            
+        # Handle goal achievement
+        if tuple(new_pos) in goal_area:
+            # Big reward for reaching the goal
+            rewards[i] = GOAL_REWARD
+            new_evacuated_agents.add(i)
+            
+            # Team reward when an agent reaches goal
+            team_reward += TEAM_SUCCESS_REWARD
+            
+            # Extra bonus based on how many agents have been evacuated
+            team_reward += EVACUATION_BONUS * (len(new_evacuated_agents) / num_agents)
+            continue
+            
+        # Basic movement rewards
+        rewards[i] = TIME_STEP_PENALTY  # Base penalty for taking time
+        
+        # Penalty for not moving
+        if np.array_equal(old_pos, new_pos):
+            rewards[i] += NOT_MOVING_PENALTY
+            
+        # Distance-based reward
+        old_distance = l1_distance(old_pos, goal_area)
+        new_distance = l1_distance(new_pos, goal_area)
+        distance_reward = (old_distance - new_distance) * DISTANCE_REWARD_SCALE
+        rewards[i] += distance_reward
+        connected_agents = 0
+        total_agents = 0
+        
+        for j, other_pos in enumerate(agent_positions):
+            if j != i and j not in evacuated_agents and j not in deactivated_agents:
+                total_agents += 1
+                distance = np.linalg.norm(new_pos - other_pos)
+                
+                # Penalty for being too close
+                if distance < AGENT_MIN_DISTANCE:
+                    # Penalty increases as agents get closer
+                    proximity_penalty = AGENT_TOO_CLOSE_PENALTY * (1 - distance/AGENT_MIN_DISTANCE)
+                    rewards[i] += proximity_penalty
+                
+                # Track if within communication range
+                if distance <= COMMUNICATION_RANGE:
+                    connected_agents += 1
+                else:
+                    # Penalty for being out of communication range
+                    # The penalty increases as the agent gets further beyond the communication range
+                    out_of_range = distance - COMMUNICATION_RANGE
+                    # Cap the penalty to avoid extreme values
+                    out_of_range = min(out_of_range, COMMUNICATION_RANGE)
+                    communication_penalty = AGENT_TOO_FAR_PENALTY * (out_of_range / COMMUNICATION_RANGE)
+                    rewards[i] += communication_penalty
+        
+        # Connectivity ratio reward - encourages maintaining communication with most agents
+        if total_agents > 0:
+            connectivity_ratio = connected_agents / total_agents
+            # Reward increasing connectivity, with diminishing returns
+            # Square root function gives more reward for first connections
+            connectivity_reward = 0.3 * np.sqrt(connectivity_ratio)
+            rewards[i] += connectivity_reward
 
-            # penalty for waiting
-            not_moving_penalty = -0.1 if np.allclose(old_pos, new_pos) else 0
-
-            # penalty for not advancing toward goal
-
-            # l1_distance_to_goal = l1_distance(new_pos, goal_area)
-            # distance_to_goal_penalty = -l1_distance_to_goal / 100
-
-            old_distance = l1_distance(old_pos, goal_area)
-            new_distance = l1_distance(new_pos, goal_area)
-            distance_to_goal_penalty = old_distance - new_distance
-
-            rewards[i] = (
-                time_step_penalty + not_moving_penalty + distance_to_goal_penalty
-            ) / 100
-
-    return rewards, evacuated_agents
+    # Add team reward component to all active agents
+    for i in range(num_agents):
+        if i not in evacuated_agents and i not in deactivated_agents:
+            rewards[i] += team_reward / max(1, (num_agents - len(evacuated_agents) - len(deactivated_agents)))
+    
+    return rewards, new_evacuated_agents

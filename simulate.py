@@ -118,8 +118,8 @@ def train(config_path: str) -> MyAgent:
             total_reward += np.sum(rewards)
 
             # Update agent policy
-            done = terminated or truncated or (total_reward < -1000)
-            agent.update_policy(actions, state, rewards, next_state, done)
+            done = terminated or truncated or (total_reward < -15000)
+            agent.update_policy(actions, state, rewards, next_state, done, env)
             state = next_state
 
             # Display of the step information
@@ -132,7 +132,7 @@ def train(config_path: str) -> MyAgent:
             )
 
             # Pause
-            # time.sleep(1)
+            time.sleep(0)
 
             # If the episode is terminated
             if done:

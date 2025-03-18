@@ -96,6 +96,7 @@ class MazeEnv(gym.Env):
         self.goal_area = []
         self.walls = set()
         self.grid = None
+        self.optimal_path = []
         self.max_episode_steps = max_episode_steps
         self.current_step = 0
 
@@ -339,11 +340,9 @@ class MazeEnv(gym.Env):
             }
 
         if self.render_mode == "human":
-            optimal = self.compute_optimal_paths(static_info)
-            #print(optimal)
+            self.optimal_path = self.compute_optimal_paths(static_info)
             self._render_frame()
-            self.render_paths(optimal)
-            time.sleep(5)
+            time.sleep(0)
 
         
         return state, info
@@ -353,9 +352,10 @@ class MazeEnv(gym.Env):
         
         rewards, evacuated_agents = compute_reward(self.num_agents, old_positions,
                                                    self.agent_positions, self.evacuated_agents, 
-                                                   self.deactivated_agents, self.goal_area,
-                                                   self.grid,
-                                                   self.walls
+                                                   self.deactivated_agents, self.goal_area
+                                                   , self.communication_range
+                                                   #,self.grid,
+                                                   #self.walls
                                                    )
         if evacuated_agents != self.evacuated_agents:
             self.evacuated_agents = evacuated_agents    
@@ -365,9 +365,6 @@ class MazeEnv(gym.Env):
 
     def step(self, actions):
         self.current_step += 1
-        with open('reward_log.txt', 'a') as log_file:
-            log_file.write(f"\n#### \n Step {self.current_step}: Reward CALL\n ####\n")
-        
         # Store the actual state for reward computation
         old_positions = [pos.copy() for pos in self.agent_positions]
         
@@ -556,82 +553,32 @@ class MazeEnv(gym.Env):
         Returns:
             dict: Dictionary mapping agent indices to their optimal paths
         """
-        optimal_paths = {}
+        optimal_path = []
         
         grid = static_info['grid']
         walls = static_info['walls']
         goal_area = static_info['goal_area']
         
         # For each agent, compute optimal path to the closest goal
+        counter = 0
         for i, pos in enumerate(self.agent_positions):
             if i in self.evacuated_agents or i in self.deactivated_agents:
                 continue
-                
-            # Find closest goal
-            closest_goal = min(goal_area, key=lambda g: abs(pos[0] - g[0]) + abs(pos[1] - g[1]))
-            
-            # Compute A* path
-            _, _, full_path = a_star(grid, pos, closest_goal, walls)
-            
-            # Store path for this agent
-            optimal_paths[i] = full_path
-            
-            # Log the path
-            with open('path_log.txt', 'a') as log_file:
-                log_file.write(f"\n----- Episode Path for Agent {i} -----\n")
-                log_file.write(f"Start: {pos}, Goal: {closest_goal}\n")
-                log_file.write(f"Path length: {len(full_path)}\n")
-                log_file.write(f"Full path: {full_path}\n")
-                log_file.write("----- End of Path -----\n")
-    
-        return optimal_paths
-
-    def render_paths(self, optimal_paths):
-        """
-        Extend the environment's render function to visualize optimal paths.
-        Should be called after the environment's regular render method.
-        
-        Args:
-            env: The environment instance
-            optimal_paths: Dictionary mapping agent indices to their optimal paths
-        """
-        if self.render_mode != "human" or not hasattr(self, 'window'):
-            return
-        
-        # Create a surface for path visualization
-        path_surface = pygame.Surface((self.screen_size, self.screen_size), pygame.SRCALPHA)
-        
-        # Draw paths for each agent
-        for agent_idx, path in optimal_paths.items():
-            if agent_idx in self.evacuated_agents or agent_idx in self.deactivated_agents:
+            counter += 1  
+            if counter >1 :
                 continue
+            else:
+                # Find closest goal
+                closest_goal = min(goal_area, key=lambda g: abs(pos[0] - g[0]) + abs(pos[1] - g[1]))
                 
-            # Get agent color
-            agent_color = self.colors['agents'][agent_idx % len(self.colors['agents'])]
-            
-            # Create a semi-transparent version of the agent color for the path
-            path_color = (*agent_color[:3], 128)  # Add alpha channel for transparency
-            
-            # Draw each segment of the path
-            for i in range(len(path) - 1):
-                start_pos = path[i]
-                end_pos = path[i + 1]
+                # Compute A* path
+                _, _, full_path = a_star(grid, pos, closest_goal, walls)
                 
-                # Convert grid positions to screen coordinates (center of cells)
-                start_x = int(start_pos[1] * self.cell_size + self.cell_size // 2)
-                start_y = int(start_pos[0] * self.cell_size + self.cell_size // 2)
-                end_x = int(end_pos[1] * self.cell_size + self.cell_size // 2)
-                end_y = int(end_pos[0] * self.cell_size + self.cell_size // 2)
-                
-                # Draw line for path segment
-                pygame.draw.line(path_surface, path_color, (start_x, start_y), (end_x, end_y), 2)
-                
-                # Draw small circle at each waypoint
-                pygame.draw.circle(path_surface, path_color, (end_x, end_y), 3)
+                # Store path for this agent
+                optimal_path = full_path
+    
+        return optimal_path
         
-        # Overlay the path surface onto the main window
-        self.window.blit(path_surface, (0, 0))
-        pygame.display.flip()
 
 
     def generate_city_layout_with_solution(self) -> Set[Tuple[int, int]]:
@@ -738,6 +685,33 @@ class MazeEnv(gym.Env):
                         ),
                         1
                     )
+                
+            if self.optimal_path and len(self.optimal_path)>0: 
+                # Create a surface for path visualization
+                path_surface = pygame.Surface((self.screen_size, self.screen_size), pygame.SRCALPHA)
+                path_color =  (255, 105, 180, 150) #Rose
+                
+                
+                # Draw each segment of the path
+                for i in range(len(self.optimal_path) - 1):
+                    start_pos = self.optimal_path[i]
+                    end_pos = self.optimal_path[i + 1]
+                    
+                    # Convert grid positions to screen coordinates (center of cells)
+                    start_x = int(start_pos[1] * self.cell_size + self.cell_size // 2)
+                    start_y = int(start_pos[0] * self.cell_size + self.cell_size // 2)
+                    end_x = int(end_pos[1] * self.cell_size + self.cell_size // 2)
+                    end_y = int(end_pos[0] * self.cell_size + self.cell_size // 2)
+                    
+                    # Draw line for path segment
+                    pygame.draw.line(path_surface, path_color, (start_x, start_y), (end_x, end_y), 2)
+                    
+                    # Draw small circle at each waypoint
+                    pygame.draw.circle(path_surface, path_color, (end_x, end_y), 3)
+            
+            # Overlay the path surface onto the main window
+            self.window.blit(path_surface, (0, 0))
+            pygame.display.flip()
 
             # Create a surface for LIDAR visualization
             lidar_surface = pygame.Surface((self.screen_size, self.screen_size), pygame.SRCALPHA)
