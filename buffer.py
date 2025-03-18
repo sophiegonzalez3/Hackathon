@@ -9,17 +9,11 @@ class Buffer:
         state_size: int,
         device: torch.device,
     ) -> None:
-        """
-        Initializes the replay buffer.
-
-        Args:
-            buffer_size (int): Maximum number of transitions to store.
-            num_agents (int): Number of agents.
-            state_size (int): Dimension of the state space.
-            device (torch.device): Device to store tensors (CPU/GPU).
-        """
         self.buffer_size = buffer_size
+        self.num_agents = num_agents
+        self.state_size = state_size
         self.device = device
+
         self.states = torch.empty(
             (buffer_size, num_agents, state_size), device=self.device
         )
@@ -43,43 +37,41 @@ class Buffer:
         next_state: torch.Tensor,
         done: torch.Tensor,
     ) -> None:
-        """
-        Stores a transition in the buffer.
+        num_states = state.shape[0]
+        if self.current_index + num_states <= self.buffer_size:
+            indices = slice(self.current_index, self.current_index + num_states)
+            self.states[indices] = state
+            self.actions[indices] = action
+            self.rewards[indices] = reward
+            self.next_states[indices] = next_state
+            self.dones[indices] = done
 
-        Args:
-            state (torch.Tensor): Tensor of shape (num_agents, state_size)
-            action (torch.Tensor): Tensor of shape (num_agents,)
-            reward (torch.Tensor): Tensor of shape (num_agents,)
-            next_state (torch.Tensor): Tensor of shape (num_agents, state_size)
-            done (torch.Tensor): Tensor of shape (num_agents,)
-        """
-        self.states[self.current_index] = state
-        self.actions[self.current_index] = action
-        self.rewards[self.current_index] = reward
-        self.next_states[self.current_index] = next_state
-        self.dones[self.current_index] = done
+            self.current_index = (self.current_index + num_states) % self.buffer_size
+            self.current_size = min(self.current_size + num_states, self.buffer_size)
+        else:
+            # Recursive call to append to first fill the buffer, and then add the rest
+            filling_size = self.buffer_size - self.current_index
 
-        self.current_index = (self.current_index + 1) % self.buffer_size
-        self.current_size = min(self.current_size + 1, self.buffer_size)
+            self.append(
+                state[:filling_size],
+                action[:filling_size],
+                reward[:filling_size],
+                next_state[:filling_size],
+                done[:filling_size],
+            )
+
+            self.append(
+                state[filling_size:],
+                action[filling_size:],
+                reward[filling_size:],
+                next_state[filling_size:],
+                done[filling_size:],
+            )
 
     def sample(
         self,
         batch_size: int,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Samples a random batch from the buffer.
-
-        Args:
-            batch_size (int): Number of samples to retrieve.
-
-        Returns:
-            tuple:
-                - states (torch.Tensor): Tensor of shape (batch_size, num_agents, state_size)
-                - actions (torch.Tensor): Tensor of shape (batch_size, num_agents)
-                - rewards (torch.Tensor): Tensor of shape (batch_size, num_agents)
-                - next_states (torch.Tensor): Tensor of shape (batch_size, num_agents, state_size)
-                - dones (torch.Tensor): Tensor of shape (batch_size, num_agents)
-        """
         indices = torch.randint(0, self.current_size, (batch_size,), device=self.device)
         return (
             self.states[indices],
