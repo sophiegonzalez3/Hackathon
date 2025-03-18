@@ -149,7 +149,11 @@ class MyAgent:
         self.epsilon_decay = 0.9995
 
         self.buffer = Buffer(
-            self.buffer_size, self.num_agents, self.state_size, self.device
+            self.buffer_size,
+            self.num_agents,
+            self.state_size,
+            self.central_state_size,
+            self.device,
         )
 
         self.q_net = QNet(self.state_size, self.action_size, self.q_net_hidden_size).to(
@@ -197,11 +201,17 @@ class MyAgent:
     def store_transition(
         self, actions: list, state: list, reward: list, next_state: list, done: bool
     ) -> None:
+        state_ = state_to_tensor(state, self.device)
+        central_state = self.extract_central_state(state_)
+        next_state_ = state_to_tensor(next_state, self.device)
+        next_central_state = self.extract_central_state(next_state_)
         self.buffer.append(
-            state=state_to_tensor(state, device=self.device),
+            state=state_,
+            central_state=central_state,
             action=torch.tensor(actions, device=self.device),
             reward=torch.tensor(reward, device=self.device),
             next_state=state_to_tensor(next_state, self.device),
+            next_central_state=next_central_state,
             done=torch.tensor(int(done), device=self.device),
         )
 
@@ -210,20 +220,22 @@ class MyAgent:
         self.epsilon = max(self.epsilon, self.epsilon_min)
 
     def extract_central_state(self, states: torch.Tensor) -> torch.Tensor:
-        batch_size = states.size(0)
-        central_state = states.reshape(batch_size, -1)
-        return central_state
+        return states.flatten()
 
     @torch.no_grad()
     def compute_target(
-        self, rewards: torch.Tensor, next_states: torch.Tensor, dones: torch.Tensor
+        self,
+        reward: torch.Tensor,
+        next_state: torch.Tensor,
+        next_central_state: torch.Tensor,
+        done: torch.Tensor,
     ) -> torch.Tensor:
         # (batch_size, 1)
-        global_reward = torch.sum(rewards, dim=1, keepdim=True)
+        global_reward = torch.sum(reward, dim=1, keepdim=True)
 
         # (batch_size, num_agents, action_size)
         next_target_qs = torch.stack(
-            [self.target_q_net(next_states[:, i]) for i in range(self.num_agents)],
+            [self.target_q_net(next_state[:, i]) for i in range(self.num_agents)],
             dim=1,
         )
 
@@ -233,35 +245,33 @@ class MyAgent:
         # (batch_size, num_agents, 1)
         next_target_best_q = next_target_qs.gather(2, next_target_best_action)
 
-        next_central_state = self.extract_central_state(next_states)
         target_q_tot = self.target_mixer(next_target_best_q, next_central_state)
 
-        dones = dones.unsqueeze(1)
+        done = done.unsqueeze(1)
 
         # (batch_size, 1)
-        y = global_reward + self.gamma * (1 - dones) * target_q_tot
+        y = global_reward + self.gamma * (1 - done) * target_q_tot
         return y
 
     def train_step(self) -> None:
-        states, actions, rewards, next_states, dones = self.buffer.sample(
-            self.batch_size
-        )
+        batch = self.buffer.sample(self.batch_size)
 
-        y = self.compute_target(rewards, next_states, dones)
+        y = self.compute_target(
+            batch.reward, batch.next_state, batch.next_central_state, batch.done
+        )
 
         # (batch_size, num_agents, action_size)
         qs = torch.stack(
-            [self.q_net(states[:, i]) for i in range(self.num_agents)], dim=1
+            [self.q_net(batch.state[:, i]) for i in range(self.num_agents)], dim=1
         )
 
         # (batch_size, num_agents, 1)
-        actions = actions.unsqueeze(2)
+        action = batch.action.unsqueeze(2)
 
-        q_values = qs.gather(2, actions)
+        q_values = qs.gather(2, action)
 
         # (batch_size, 1)
-        central_state = self.extract_central_state(next_states)
-        q_tot = self.mixer(q_values, central_state)
+        q_tot = self.mixer(q_values, batch.central_state)
 
         self.optimizer.zero_grad()
         loss = F.smooth_l1_loss(q_tot, y)
