@@ -210,7 +210,6 @@ class MyAgent:
         self.epsilon = max(self.epsilon, self.epsilon_min)
 
     def extract_central_state(self, states: torch.Tensor) -> torch.Tensor:
-        """Extract global state information from agent states."""
         batch_size = states.size(0)
         central_state = states.reshape(batch_size, -1)
         return central_state
