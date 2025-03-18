@@ -52,39 +52,39 @@ class MixingNetwork(nn.Module):
     """QMIX Mixing Network that enforces monotonicity constraint."""
 
     def __init__(
-        self, num_agents: int, state_size: int, mixing_hidden_dim: int
+        self, num_agents: int, central_state_size: int, mixing_hidden_dim: int
     ) -> None:
         super().__init__()
 
         self.num_agents = num_agents
-        self.state_size = state_size
+        self.state_size = central_state_size
         self.mixing_hidden_dim = mixing_hidden_dim
 
         # Hypernetworks generate the weights and biases for the mixing network
         # First layer weights (positive only) - num_agents x mixing_hidden_dim
         self.hyper_w1 = nn.Sequential(
-            nn.Linear(state_size, mixing_hidden_dim),
+            nn.Linear(central_state_size, mixing_hidden_dim),
             nn.ReLU(),
             nn.Linear(mixing_hidden_dim, num_agents * mixing_hidden_dim),
         )
 
         # First layer bias
         self.hyper_b1 = nn.Sequential(
-            nn.Linear(state_size, mixing_hidden_dim),
+            nn.Linear(central_state_size, mixing_hidden_dim),
             nn.ReLU(),
             nn.Linear(mixing_hidden_dim, mixing_hidden_dim),
         )
 
         # Second layer weights (positive only) - mixing_hidden_dim x 1
         self.hyper_w2 = nn.Sequential(
-            nn.Linear(state_size, mixing_hidden_dim),
+            nn.Linear(central_state_size, mixing_hidden_dim),
             nn.ReLU(),
             nn.Linear(mixing_hidden_dim, mixing_hidden_dim),
         )
 
         # Second layer bias
         self.hyper_b2 = nn.Sequential(
-            nn.Linear(state_size, mixing_hidden_dim),
+            nn.Linear(central_state_size, mixing_hidden_dim),
             nn.ReLU(),
             nn.Linear(mixing_hidden_dim, 1),
         )
@@ -99,22 +99,17 @@ class MixingNetwork(nn.Module):
         """
         batch_size = agent_qs.size(0)
 
-        # First layer
-        w1 = torch.abs(
-            self.hyper_w1(states)
-        )  # Ensure positive weights for monotonicity
-        w1 = w1.view(batch_size, self.num_agents, self.mixing_hidden_dim)
+        w1 = torch.abs(self.hyper_w1(states)).view(
+            batch_size, self.num_agents, self.mixing_hidden_dim
+        )
         b1 = self.hyper_b1(states).view(batch_size, 1, self.mixing_hidden_dim)
 
-        # Second layer
-        w2 = torch.abs(
-            self.hyper_w2(states)
-        )  # Ensure positive weights for monotonicity
+        w2 = torch.abs(self.hyper_w2(states))
         w2 = w2.view(batch_size, self.mixing_hidden_dim, 1)
         b2 = self.hyper_b2(states).view(batch_size, 1, 1)
 
         # Forward pass
-        hidden = F.elu(torch.bmm(agent_qs.squeeze(2).unsqueeze(1), w1) + b1)
+        hidden = F.elu(torch.bmm(agent_qs.unsqueeze(1), w1) + b1)
         q_tot = torch.bmm(hidden, w2) + b2
 
         return q_tot.squeeze(2)
@@ -136,14 +131,14 @@ class MyAgent:
         self.state_size = 10 * num_agents + 2
         self.central_state_size = num_agents * self.state_size
         self.action_size = self.action_high + 1
-        self.q_net_hidden_size = 64
-        self.mixing_hidden_size = 64
+        self.q_net_hidden_size = 128
+        self.mixing_hidden_size = 128
 
         self.buffer_size = 10_000
         self.batch_size = 256
-        self.lr = 1e-3
-        self.gamma = 0.99
-        self.tau = 0.005
+        self.lr = 3e-4
+        self.gamma = 0.999
+        self.tau = 0.05
         self.epsilon = 1.0
         self.epsilon_min = 1e-2
         self.epsilon_decay = 0.9995
@@ -168,7 +163,7 @@ class MyAgent:
         self.target_mixer = copy.deepcopy(self.mixer)
         self.target_mixer.eval()
 
-        self.optimizer = optim.AdamW(
+        self.optimizer = optim.Adam(
             list(self.q_net.parameters()) + list(self.mixer.parameters()), self.lr
         )
 
@@ -177,34 +172,36 @@ class MyAgent:
             self.update_epsilon()
 
         actions = []
-        for agent, raw_s in enumerate(state):
+        for agent, agent_state in enumerate(state):
             if (not evaluation) and self.rng.random() < self.epsilon:
                 actions.append(self.rng.integers(self.action_low, self.action_high))
             else:
-                s = torch.from_numpy(raw_s).to(self.device)
-                a_scores = self.q_net(s.unsqueeze(0)).squeeze(0).cpu().detach().numpy()
+                agent_state_tensor = torch.from_numpy(agent_state).to(self.device)
+                a_scores = (
+                    self.q_net(agent_state_tensor.unsqueeze(0))
+                    .squeeze(0)
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
                 a = np.argmax(a_scores)
                 actions.append(a)
 
         return actions
 
     def update_policy(
-        self, actions: list, state: list, reward: list, next_state: list, done: bool
+        self,
+        actions: list,
+        state: list,
+        reward: list,
+        next_state: list,
+        done: bool,
     ):
-        self.store_transition(actions, state, reward, next_state, done)
-
-        if len(self.buffer) < self.batch_size:
-            return
-
-        self.train_step()
-
-    def store_transition(
-        self, actions: list, state: list, reward: list, next_state: list, done: bool
-    ) -> None:
         state_ = state_to_tensor(state, self.device)
         central_state = self.extract_central_state(state_)
         next_state_ = state_to_tensor(next_state, self.device)
         next_central_state = self.extract_central_state(next_state_)
+
         self.buffer.append(
             state=state_,
             central_state=central_state,
@@ -214,6 +211,11 @@ class MyAgent:
             next_central_state=next_central_state,
             done=torch.tensor(int(done), device=self.device),
         )
+
+        if len(self.buffer) < self.batch_size:
+            return
+
+        self.train_step()
 
     def update_epsilon(self) -> None:
         self.epsilon *= self.epsilon_decay
@@ -242,8 +244,10 @@ class MyAgent:
         # (batch_size, num_agents, 1)
         next_target_best_action = next_target_qs.argmax(dim=2, keepdim=True)
 
-        # (batch_size, num_agents, 1)
-        next_target_best_q = next_target_qs.gather(2, next_target_best_action)
+        # (batch_size, num_agents)
+        next_target_best_q = next_target_qs.gather(2, next_target_best_action).squeeze(
+            2
+        )
 
         target_q_tot = self.target_mixer(next_target_best_q, next_central_state)
 
@@ -268,7 +272,7 @@ class MyAgent:
         # (batch_size, num_agents, 1)
         action = batch.action.unsqueeze(2)
 
-        q_values = qs.gather(2, action)
+        q_values = qs.gather(2, action).squeeze(2)
 
         # (batch_size, 1)
         q_tot = self.mixer(q_values, batch.central_state)
@@ -279,3 +283,4 @@ class MyAgent:
         self.optimizer.step()
 
         soft_update(self.q_net, self.target_q_net, self.tau)
+        soft_update(self.mixer, self.target_mixer, self.tau)
