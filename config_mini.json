@@ -2,7 +2,7 @@
   "grid_size": 10,
   "walls_proportion": 0,
   "num_dynamic_obstacles": 0,
-  "num_agents": 2,
+  "num_agents": 1,
   "communication_range": 8,
   "max_lidar_dist_main": 5,
   "max_lidar_dist_second": 3,

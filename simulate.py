@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from agentqmix import MyAgent
+from dqrn import DRQNAgent as MyAgent
 from env import MazeEnv
 
 
@@ -106,6 +106,7 @@ def train(config_path: str) -> MyAgent:
 
     # Initial reset of the environment
     state, info = env.reset()
+    agent.new_episode()
     # time.sleep(1)
 
     try:
@@ -118,7 +119,7 @@ def train(config_path: str) -> MyAgent:
             total_reward += np.sum(rewards)
 
             # Update agent policy
-            done = terminated or truncated or (total_reward < -1000)
+            done = terminated or truncated or (total_reward < -20_000)
             agent.update_policy(actions, state, rewards, next_state, done)
             state = next_state
 
@@ -143,6 +144,7 @@ def train(config_path: str) -> MyAgent:
 
                 if episode_count < max_episodes:
                     state, info = env.reset()
+                    agent.new_episode()
 
     except KeyboardInterrupt:
         print("\nSimulation interrupted by the user")

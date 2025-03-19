@@ -1,119 +1,107 @@
+import random
+from collections import deque
 from dataclasses import dataclass
 
 import torch
 
 
-@dataclass
-class Batch:
+@dataclass(frozen=True)
+class Transition:
     state: torch.Tensor
-    central_state: torch.Tensor
     action: torch.Tensor
     reward: torch.Tensor
     next_state: torch.Tensor
-    next_central_state: torch.Tensor
     done: torch.Tensor
 
 
-class Buffer:
-    def __init__(
-        self,
-        buffer_size: int,
-        num_agents: int,
-        state_size: int,
-        central_state_size: int,
-        device: torch.device,
-    ) -> None:
-        self.buffer_size = buffer_size
-        self.num_agents = num_agents
-        self.state_size = state_size
-        self.central_state_size = central_state_size
-        self.device = device
-
-        self.state_buffer = torch.empty(
-            (buffer_size, num_agents, state_size), device=self.device
-        )
-        self.central_state_buffer = torch.empty(
-            (buffer_size, central_state_size), device=self.device
-        )
-        self.action_buffer = torch.empty(
-            (buffer_size, num_agents), dtype=torch.int64, device=self.device
-        )
-        self.reward_buffer = torch.empty((buffer_size, num_agents), device=self.device)
-        self.next_state_buffer = torch.empty(
-            (buffer_size, num_agents, state_size), device=self.device
-        )
-        self.next_central_state_buffer = torch.empty(
-            (buffer_size, central_state_size), device=self.device
-        )
-        self.done_buffer = torch.empty(
-            (buffer_size,), dtype=torch.int8, device=self.device
-        )
-
-        self.current_index = 0
-        self.current_size = 0
+class EpisodeBuffer:
+    def __init__(self) -> None:
+        self.transitions: list[Transition] = []
 
     def append(
         self,
         state: torch.Tensor,
-        central_state: torch.Tensor,
         action: torch.Tensor,
         reward: torch.Tensor,
         next_state: torch.Tensor,
-        next_central_state: torch.Tensor,
         done: torch.Tensor,
     ) -> None:
-        num_states = state.shape[0]
-        if self.current_index + num_states <= self.buffer_size:
-            indices = slice(self.current_index, self.current_index + num_states)
-            self.state_buffer[indices] = state
-            self.central_state_buffer[indices] = central_state
-            self.action_buffer[indices] = action
-            self.reward_buffer[indices] = reward
-            self.next_state_buffer[indices] = next_state
-            self.next_central_state_buffer[indices] = next_central_state
-            self.done_buffer[indices] = done
-
-            self.current_index = (self.current_index + num_states) % self.buffer_size
-            self.current_size = min(self.current_size + num_states, self.buffer_size)
-        else:
-            # Recursive call to append to first fill the buffer, and then add the rest
-            filling_size = self.buffer_size - self.current_index
-
-            self.append(
-                state[:filling_size],
-                central_state[:filling_size],
-                action[:filling_size],
-                reward[:filling_size],
-                next_state[:filling_size],
-                next_central_state[:filling_size],
-                done[:filling_size],
-            )
-
-            self.append(
-                state[filling_size:],
-                central_state[filling_size:],
-                action[filling_size:],
-                reward[filling_size:],
-                next_state[filling_size:],
-                next_central_state[filling_size:],
-                done[filling_size:],
-            )
-
-    def sample(
-        self,
-        batch_size: int,
-    ) -> Batch:
-        indices = torch.randint(0, self.current_size, (batch_size,), device=self.device)
-        return Batch(
-            state=self.state_buffer[indices],
-            central_state=self.central_state_buffer[indices],
-            action=self.action_buffer[indices],
-            reward=self.reward_buffer[indices],
-            next_state=self.next_state_buffer[indices],
-            next_central_state=self.next_central_state_buffer[indices],
-            done=self.done_buffer[indices],
-        )
+        self.transitions.append(Transition(state, action, reward, next_state, done))
 
     def __len__(self) -> int:
-        """Returns the number of stored transitions."""
-        return self.current_size
+        return len(self.transitions)
+
+    def is_empty(self) -> bool:
+        return len(self.transitions) == 0
+
+
+class ReplayMemory:
+    def __init__(self, buffer_size: int, sequence_length: int) -> None:
+        self.buffer_size = buffer_size
+        self.sequence_length = sequence_length
+        self.episodes = deque(maxlen=buffer_size)
+        self.current_episode = EpisodeBuffer()
+
+    def new_episode(self) -> None:
+        if len(self.current_episode) > 0:
+            self.episodes.append(self.current_episode)
+        self.current_episode = EpisodeBuffer()
+
+    def append(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        reward: torch.Tensor,
+        next_state: torch.Tensor,
+        done: torch.Tensor,
+    ) -> None:
+        self.current_episode.append(state, action, reward, next_state, done)
+
+    def sample(self, batch_size: int):
+        if len(self.episodes) < batch_size:
+            return None
+
+        sampled_episodes = random.sample(self.episodes, batch_size)
+
+        batch_states = []
+        batch_actions = []
+        batch_rewards = []
+        batch_next_states = []
+        batch_dones = []
+
+        for episode in sampled_episodes:
+            if len(episode.transitions) < self.sequence_length:
+                continue
+
+            start_idx = random.randint(
+                0, len(episode.transitions) - self.sequence_length
+            )
+            transitions = episode.transitions[
+                start_idx : start_idx + self.sequence_length
+            ]
+
+            states = torch.stack([t.state for t in transitions])
+            actions = torch.tensor([t.action for t in transitions])
+            rewards = torch.tensor([t.reward for t in transitions])
+            next_states = torch.stack([t.next_state for t in transitions])
+            dones = torch.tensor([t.done for t in transitions])
+
+            batch_states.append(states)
+            batch_actions.append(actions)
+            batch_rewards.append(rewards)
+            batch_next_states.append(next_states)
+            batch_dones.append(dones)
+
+        if not batch_states:
+            return None
+
+        return (
+            torch.stack(batch_states),
+            torch.stack(batch_actions),
+            torch.stack(batch_rewards),
+            torch.stack(batch_next_states),
+            torch.stack(batch_dones),
+        )
+
+    def __len__(self):
+        return len(self.episodes)
