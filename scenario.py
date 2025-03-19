@@ -45,17 +45,15 @@ def train_scenarios():
         for f in os.listdir("eval_configs") if f.startswith("config_")
     ])
 
-    all_rewards_per_scenario = []  # Liste pour stocker les récompenses de chaque scénario
-    trained_agents = []  # Liste pour stocker les agents entraînés
+    all_rewards_per_scenario = []
+    trained_agents = []
 
     for i, config_path in enumerate(scenario_paths, 1):
         print(f"\nEntraînement sur scénario {i}: {config_path}")
         
-        # Entraîner avec le chemin du fichier de configuration
         trained_agent, all_rewards = simulate.train(config_path)
         print(f"Moyennes des récompenses obtenues pour le scénario {i} : {np.mean(all_rewards)}")
         
-        # Ajouter l'agent et les récompenses du scénario
         trained_agents.append(trained_agent)
         all_rewards_per_scenario.append(all_rewards)
 
@@ -63,23 +61,13 @@ def train_scenarios():
 
 
 def plot_cumulated_rewards(scenarios_rewards: list, interval: int = 100):
-    """
-    Plot and save the rewards over episodes for multiple scenarios.
-
-    Args:
-        scenarios_rewards (list of lists): List of total rewards per episode for each scenario.
-        interval (int): Interval between ticks on the x-axis (default is 100).
-    """
     plt.figure(figsize=(10, 6))
 
-    # Color list for different scenarios
-    colors = ["blue", "green", "red", "orange", "purple"]
+    colors = ["blue", "green", "red", "orange", "purple", "yellow", "pink", "black", "white", "gray", "violet", "maroon", "turquoise"]
 
-    # Pour chaque scénario
     for i, rewards in enumerate(scenarios_rewards):
-        # Vérifier si rewards est un nombre unique (cas où il n'y a qu'une seule valeur)
         if isinstance(rewards, np.float64):
-            rewards = [rewards]  # Convertir en liste si nécessaire
+            rewards = [rewards]
         
         plt.plot(
             range(1, len(rewards) + 1), rewards, 
@@ -90,7 +78,6 @@ def plot_cumulated_rewards(scenarios_rewards: list, interval: int = 100):
     plt.title("Total Cumulated Rewards per Episode for Multiple Scenarios")
     plt.xlabel("Episodes")
 
-    # Ajuster les ticks de l'axe X tous les 'interval' épisodes
     xticks = range(1, len(rewards) + 1, interval)
     plt.xticks(xticks)
 
