@@ -220,8 +220,8 @@ def compute_reward_star(
     return rewards, evacuated_agents
 
 
-def l1_distance(pos, goal_area):
-    return abs(goal_area[0][0] - pos[0]) + abs(goal_area[0][1] - pos[1])
+def manhattan_distance(pos1, pos2):
+    return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
 
 def compute_reward(
@@ -234,35 +234,105 @@ def compute_reward(
 ):
     rewards = np.zeros(num_agents)
 
-    # Compute reward for each agent
-    for i, (old_pos, new_pos) in enumerate(zip(old_positions, agent_positions)):
-        if i in evacuated_agents:
+    # Constants for reward shaping
+    GOAL_REWARD = 10.0         # Large reward for reaching the goal
+    STEP_PENALTY = -0.01       # Small penalty for each step to encourage efficiency
+    DISTANCE_SCALE = 0.1       # Scale factor for distance-based reward
+    REVISIT_PENALTY = -0.05    # Penalty for revisiting cells (to avoid loops)
+    DEACTIVATION_PENALTY = -1.0  # Penalty for getting deactivated (e.g., hitting walls)
+    
+    # Track visit counts for each position (shared across all agents)
+    # This should be maintained between calls (defined outside or as a class variable)
+    # visit_counts = {}  # Uncomment and define this outside the function
+    
+    for agent_id in range(num_agents):
+        # Skip agents that were already evacuated or deactivated
+        if agent_id in evacuated_agents or agent_id in deactivated_agents:
             continue
-        elif i in deactivated_agents:  # Penalties for each deactivated agent
-            rewards[i] = -100.0
-        elif (
-            tuple(new_pos) in goal_area
-        ):  # One-time reward for each agent reaching the goal
-            rewards[i] = 1000.0
-            evacuated_agents.add(i)
-        else:
-            # penalty for being slow
-            time_step_penalty = -1
-
-            # penalty for waiting
-            not_moving_penalty = -1 if np.allclose(old_pos, new_pos) else 0
-
-            # penalty for not advancing toward goal
-
-            # l1_distance_to_goal = l1_distance(new_pos, goal_area)
-            # distance_to_goal_penalty = -l1_distance_to_goal / 100
-
-            # old_distance = l1_distance(old_pos, goal_area)
-            new_distance = l1_distance(new_pos, goal_area)
-            distance_to_goal_penalty = -new_distance
-
-            rewards[i] = (
-                time_step_penalty + not_moving_penalty + distance_to_goal_penalty
-            )
-
+            
+        old_pos = old_positions[agent_id]
+        new_pos = agent_positions[agent_id]
+        
+        # Penalty for each step to encourage efficiency
+        rewards[agent_id] += STEP_PENALTY
+        
+        # If agent reached the goal area
+        if tuple(new_pos) in goal_area:
+            rewards[agent_id] += GOAL_REWARD
+            evacuated_agents.add(agent_id)
+            continue
+            
+        # Check if agent was just deactivated (hit a wall or went out of bounds)
+        if agent_id in deactivated_agents:
+            rewards[agent_id] += DEACTIVATION_PENALTY
+            continue
+            
+        # Calculate Manhattan distance to goal (assuming goal is in the opposite corner)
+        # This assumes goal_area is a set of tuples representing goal positions
+        if goal_area:  # Make sure goal_area is not empty
+            goal_pos = next(iter(goal_area))  # Take first position from goal area
+            old_distance = abs(old_pos[0] - goal_pos[0]) + abs(old_pos[1] - goal_pos[1])
+            new_distance = abs(new_pos[0] - goal_pos[0]) + abs(new_pos[1] - goal_pos[1])
+            
+            # Reward for moving closer to the goal, penalize for moving away
+            distance_reward = (old_distance - new_distance) * DISTANCE_SCALE
+            rewards[agent_id] += distance_reward
+        
+        # Penalize revisiting the same position (to avoid loops)
+        # This requires tracking visit counts outside this function
+        # visit_key = tuple(new_pos)
+        # if visit_key in visit_counts:
+        #     visit_counts[visit_key] += 1
+        #     if visit_counts[visit_key] > 1:
+        #         rewards[agent_id] += REVISIT_PENALTY * (visit_counts[visit_key] - 1)
+        # else:
+        #     visit_counts[visit_key] = 1
+    
     return rewards, evacuated_agents
+
+# def compute_reward(
+#     num_agents,
+#     old_positions,
+#     agent_positions,
+#     evacuated_agents,
+#     deactivated_agents,
+#     goal_area,
+# ):
+#     rewards = np.zeros(num_agents)
+
+
+#     rewards -= 0.01  * (num_agents - len(deactivated_agents))
+    
+#     # Compute reward for each agent
+#     for i, (old_pos, new_pos) in enumerate(zip(old_positions, agent_positions)):
+#         if i in evacuated_agents:
+#             rewards[i] = 
+#             continue
+#         elif i in deactivated_agents:  # Penalties for each deactivated agent
+#             rewards[i] = -10.0
+#         elif (
+#             tuple(new_pos) in goal_area
+#         ):  # One-time reward for each agent reaching the goal
+#             rewards[i] = 500.0
+#             evacuated_agents.add(i)
+#         else:
+#             # penalty for being slow
+#             time_step_penalty = -1
+
+#             # penalty for waiting
+#             not_moving_penalty = -1 if np.allclose(old_pos, new_pos) else 0
+
+#             # penalty for not advancing toward goal
+
+#             # l1_distance_to_goal = l1_distance(new_pos, goal_area)
+#             # distance_to_goal_penalty = -l1_distance_to_goal / 100
+
+#             # old_distance = l1_distance(old_pos, goal_area)
+#             new_distance = l1_distance(new_pos, goal_area)
+#             distance_to_goal_penalty = -new_distance
+
+#             rewards[i] = (
+#                 time_step_penalty + not_moving_penalty + distance_to_goal_penalty
+#             ) / 100
+
+#     return rewards, evacuated_agents

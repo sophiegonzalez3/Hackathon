@@ -7,11 +7,11 @@ import torch
 
 @dataclass(frozen=True)
 class Transition:
-    state: torch.Tensor
-    action: torch.Tensor
-    reward: torch.Tensor
-    next_state: torch.Tensor
-    done: torch.Tensor
+    state: torch.Tensor  # (num_agents, state_size)
+    action: torch.Tensor  # (num_agents,)
+    reward: torch.Tensor  # (num_agents,)
+    next_state: torch.Tensor  # (num_agents, state_size)
+    done: torch.Tensor  # ()
 
 
 class EpisodeBuffer:
@@ -24,7 +24,7 @@ class EpisodeBuffer:
         action: torch.Tensor,
         reward: torch.Tensor,
         next_state: torch.Tensor,
-        done: torch.Tensor,
+        done: torch.Tensor
     ) -> None:
         self.transitions.append(Transition(state, action, reward, next_state, done))
 
@@ -81,10 +81,10 @@ class ReplayMemory:
             ]
 
             states = torch.stack([t.state for t in transitions])
-            actions = torch.tensor([t.action for t in transitions])
-            rewards = torch.tensor([t.reward for t in transitions])
+            actions = torch.stack([t.action for t in transitions])
+            rewards = torch.stack([t.reward for t in transitions])
             next_states = torch.stack([t.next_state for t in transitions])
-            dones = torch.tensor([t.done for t in transitions])
+            dones = torch.stack([t.done for t in transitions])
 
             batch_states.append(states)
             batch_actions.append(actions)

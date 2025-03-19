@@ -6,7 +6,115 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from buffer import ReplayMemory
+
+import random
+from collections import deque
+from dataclasses import dataclass
+
+import torch
+
+
+@dataclass(frozen=True)
+class Transition:
+    state: torch.Tensor
+    action: torch.Tensor
+    reward: torch.Tensor
+    next_state: torch.Tensor
+    done: torch.Tensor
+
+
+class EpisodeBuffer:
+    def __init__(self) -> None:
+        self.transitions: list[Transition] = []
+
+    def append(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        reward: torch.Tensor,
+        next_state: torch.Tensor,
+        done: torch.Tensor,
+    ) -> None:
+        self.transitions.append(Transition(state, action, reward, next_state, done))
+
+    def __len__(self) -> int:
+        return len(self.transitions)
+
+    def is_empty(self) -> bool:
+        return len(self.transitions) == 0
+
+
+class ReplayMemory:
+    def __init__(self, buffer_size: int, sequence_length: int) -> None:
+        self.buffer_size = buffer_size
+        self.sequence_length = sequence_length
+        self.episodes = deque(maxlen=buffer_size)
+        self.current_episode = EpisodeBuffer()
+
+    def new_episode(self) -> None:
+        if len(self.current_episode) > 0:
+            self.episodes.append(self.current_episode)
+        self.current_episode = EpisodeBuffer()
+
+    def append(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        reward: torch.Tensor,
+        next_state: torch.Tensor,
+        done: torch.Tensor,
+    ) -> None:
+        self.current_episode.append(state, action, reward, next_state, done)
+
+    def sample(self, batch_size: int):
+        if len(self.episodes) < batch_size:
+            return None
+
+        sampled_episodes = random.sample(self.episodes, batch_size)
+
+        batch_states = []
+        batch_actions = []
+        batch_rewards = []
+        batch_next_states = []
+        batch_dones = []
+
+        for episode in sampled_episodes:
+            if len(episode.transitions) < self.sequence_length:
+                continue
+
+            start_idx = random.randint(
+                0, len(episode.transitions) - self.sequence_length
+            )
+            transitions = episode.transitions[
+                start_idx : start_idx + self.sequence_length
+            ]
+
+            from IPython import embed; embed()
+            states = torch.stack([t.state for t in transitions])
+            actions = torch.tensor([t.action for t in transitions])
+            rewards = torch.tensor([t.reward for t in transitions])
+            next_states = torch.stack([t.next_state for t in transitions])
+            dones = torch.tensor([t.done for t in transitions])
+
+            batch_states.append(states)
+            batch_actions.append(actions)
+            batch_rewards.append(rewards)
+            batch_next_states.append(next_states)
+            batch_dones.append(dones)
+
+        if not batch_states:
+            return None
+
+        return (
+            torch.stack(batch_states),
+            torch.stack(batch_actions),
+            torch.stack(batch_rewards),
+            torch.stack(batch_next_states),
+            torch.stack(batch_dones),
+        )
+
+    def __len__(self):
+        return len(self.episodes)
 
 
 class DRQNNetwork(nn.Module):
@@ -21,7 +129,9 @@ class DRQNNetwork(nn.Module):
         self.num_layers = num_layers
 
         self.feature_layer = nn.Sequential(
-            nn.Linear(state_size, hidden_size), nn.ReLU()
+            nn.Linear(state_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
         )
 
         self.gru = nn.GRU(
@@ -31,7 +141,7 @@ class DRQNNetwork(nn.Module):
             batch_first=True,
         )
 
-        self.output_layer = nn.Linear(hidden_size, action_size)
+        self.output_layer = nn.Linear(2 * hidden_size, action_size)
 
     def forward(
         self, state: torch.Tensor, hidden_state: torch.Tensor | None = None
@@ -40,17 +150,17 @@ class DRQNNetwork(nn.Module):
         sequence_length = state.size(1)
 
         state = state.view(-1, state.size(-1))
-        z = self.feature_layer(state)
-        z = z.view(batch_size, sequence_length, -1)
+        z1 = self.feature_layer(state)
+        z1 = z1.view(batch_size, sequence_length, -1)
 
         if hidden_state is None:
-            h0 = torch.zeros(batch_size, self.num_layers, self.hidden_dim).to(
+            h0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(
                 state.device
             )
             hidden_state = h0
 
-        z, hidden_state = self.gru(z, hidden_state)
-
+        z2, hidden_state = self.gru(z1, hidden_state)
+        z = torch.cat((z1, z2), dim=2)
         action = self.output_layer(z)
         return action, hidden_state
 
@@ -65,12 +175,12 @@ class DRQNAgent:
         self.hidden_size = 128
         self.lr = 1e-3
         self.gamma = 0.99
-        self.buffer_size = 10_000
         self.epsilon = 1.0
         self.epsilon_end = 0.01
         self.epsilon_decay = 0.9999
+        self.buffer_size = 10_000
         self.sequence_length = 20
-        self.batch_size = 1000
+        self.batch_size = 64
         self.target_update_freq = 1
 
         # Initialize Q networks
@@ -96,7 +206,7 @@ class DRQNAgent:
         else:
             epsilon = self.epsilon
             self.update_epsilon()
-        print(f"\t{epsilon=}")
+        # print(f"\t{epsilon=}")
 
         if self.rng.random() < epsilon:
             return np.random.randint(0, self.action_size - 1)
@@ -118,12 +228,11 @@ class DRQNAgent:
         self, state: list, action: list, reward, next_state: list, done: bool
     ) -> None:
         self.store_transition(state, action, reward, next_state, done)
-
         batch = self.memory.sample(self.batch_size)
         if batch is None:
             return
 
-        self.train_step(self, batch)
+        self.train_step(batch)
 
     def store_transition(
         self, state: list, action: list, reward, next_state: list, done: bool
@@ -142,7 +251,6 @@ class DRQNAgent:
         )
 
     def train_step(self, batch):
-        print("train_step")
         """Perform one step of optimization."""
         states, actions, rewards, next_states, dones = batch
         states = states.to(self.device)
@@ -164,9 +272,11 @@ class DRQNAgent:
             next_q_values = next_q_values * (1 - dones.float())
 
             # Compute target Q values
-            target_q_values = rewards + (self.gamma * next_q_values)
+            # from IPython import embed; embed()
+            target_q_values = rewards.squeeze() + (self.gamma * next_q_values)
 
         # Compute loss
+        # from IPython import embed; embed()
         loss = F.smooth_l1_loss(q_values, target_q_values)
 
         # Optimize the model

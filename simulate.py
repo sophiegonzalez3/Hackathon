@@ -7,7 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from dqrn import DRQNAgent as MyAgent
+# from drqn import DRQNAgent as MyAgent
+# from idrqn import IDRQNAgent as MyAgent
+from rvdn import VDNAgent as MyAgent
 from env import MazeEnv
 
 
@@ -120,17 +122,8 @@ def train(config_path: str) -> MyAgent:
 
             # Update agent policy
             done = terminated or truncated or (total_reward < -20_000)
-            agent.update_policy(actions, state, rewards, next_state, done)
+            agent.update_policy(state, actions, rewards, next_state, done)
             state = next_state
-
-            # Display of the step information
-            print(
-                f"\rEpisode {episode_count + 1}, Step {info['current_step']}, "
-                f"Reward: {total_reward:.2f}, "
-                f"Evacuated: {len(info['evacuated_agents'])}, "
-                f"Deactivated: {len(info['deactivated_agents'])}",
-                end="",
-            )
 
             # Pause
             # time.sleep(1)
@@ -138,6 +131,14 @@ def train(config_path: str) -> MyAgent:
             # If the episode is terminated
             if done:
                 print("\r")
+                # Display of the step information
+                print(
+                    f"\rEpisode {episode_count + 1}, Step {info['current_step']}, "
+                    f"Reward: {total_reward:.2f}, "
+                    f"Evacuated: {len(info['evacuated_agents'])}, "
+                    f"Deactivated: {len(info['deactivated_agents'])}",
+                    end="",
+                )
                 episode_count += 1
                 all_rewards.append(total_reward)
                 total_reward = 0
