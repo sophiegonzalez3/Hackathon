@@ -1,6 +1,7 @@
 import json
 import numpy as np
 import os
+import simulate
 
 def generate_scenarios(num_scenarios):
     config_ranges = {
@@ -37,3 +38,17 @@ def generate_scenarios(num_scenarios):
         scenario_list.append(scenario)
 
     return scenario_list
+
+def train_scenarios():
+    scenario_paths = sorted([
+        os.path.join("eval_configs", f)
+        for f in os.listdir("eval_configs") if f.startswith("config_")
+    ])
+
+    for i, config_path in enumerate(scenario_paths, 1):
+        print(f"\nEntraînement sur scénario {i}: {config_path}")
+        
+        # Entraîner avec le chemin du fichier de configuration
+        trained_agent, all_rewards = simulate.train(config_path)
+        print(f"Moyennes des récompenses obtenues pour le scénario {i} : {np.mean(all_rewards)}")
+
