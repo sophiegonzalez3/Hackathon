@@ -26,7 +26,7 @@ class DRQNNetwork(nn.Module):
 
         self.feature_layer = nn.Sequential(
             nn.Linear(state_size, hidden_size),
-            nn.ReLU(),
+            nn.PReLU(),
             nn.Linear(hidden_size, hidden_size),
         )
 
@@ -37,7 +37,11 @@ class DRQNNetwork(nn.Module):
             batch_first=True,
         )
 
-        self.output_layer = nn.Linear(hidden_size, action_size)
+        self.output_layer = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.PReLU(),
+            nn.Linear(hidden_size, action_size),
+        )
 
     def forward(
         self, state: torch.Tensor, hidden_state: torch.Tensor | None = None
@@ -74,7 +78,7 @@ class IDRQNAgent:
         self.individual_state_size = 10 * num_agents + 2
         self.state_size = self.individual_state_size
         self.action_size = 7
-        self.hidden_size = 256
+        self.hidden_size = 128
         self.num_rnn_layers = 1
         self.lr = 1e-3
         self.gamma = 0.99

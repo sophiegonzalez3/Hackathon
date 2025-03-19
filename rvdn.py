@@ -26,17 +26,15 @@ class DRQNNetwork(nn.Module):
 
         self.feature_layer = nn.Sequential(
             nn.Linear(state_size, hidden_size),
-            nn.ReLU(),
+            nn.ELU(),
             nn.Linear(hidden_size, hidden_size),
         )
-
         self.gru = nn.GRU(
             input_size=hidden_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
         )
-
         self.output_layer = nn.Linear(hidden_size, action_size)
 
     def forward(
@@ -62,8 +60,6 @@ class DRQNNetwork(nn.Module):
 
 class VDNAgent:
     def __init__(self, num_agents: int) -> None:
-        print("Loading VDN agent")
-
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.rng = np.random.default_rng()
         self.num_agents = num_agents
@@ -84,9 +80,9 @@ class VDNAgent:
         self.epsilon = 1.0
         self.epsilon_end = 0.01
         self.epsilon_decay = 0.9995
-        self.buffer_size = 10_000
+        self.buffer_size = 128
         self.sequence_length = 20
-        self.batch_size = 64
+        self.batch_size = 32
         self.target_update_freq = 1
 
         # Initialize shared Q network for all agents
@@ -107,6 +103,9 @@ class VDNAgent:
         # Hidden states for each agent
         self.hidden_states = [None for _ in range(num_agents)]
         self.steps_done = 0
+
+        print("Using VDN agent with shared policy")
+        print(self.policy_net)
 
     def get_action(self, state_list: list, evaluation: bool = False):
         # Convert all states to batch for efficient processing
@@ -131,7 +130,7 @@ class VDNAgent:
                 )
                 action = q_values.squeeze(0).squeeze(0).argmax().cpu().item()
                 actions.append(action)
-            
+
         return actions
 
     def new_episode(self) -> None:
@@ -188,23 +187,23 @@ class VDNAgent:
         """Compute the VDN target: sum of individual target Q-values"""
         batch_size = next_states.size(0)
         seq_len = next_states.size(1)
-        
+
         # Initialize total Q-values
         total_target_q_values = torch.zeros(batch_size, seq_len, device=self.device)
-        
+
         # Calculate individual Q-values for each agent and sum them
         for agent_id in range(self.num_agents):
             # Get next Q values from target network for this agent
             next_q_values, _ = self.target_net(next_states[:, :, agent_id])
             next_max_q = next_q_values.max(2)[0]
-            
+
             # Set future value to 0 for terminal states
             next_max_q = next_max_q * (1 - dones.float())
-            
+
             # Add individual agent's contribution to total
             agent_target = rewards[:, :, agent_id].squeeze(-1) + (self.gamma * next_max_q)
             total_target_q_values += agent_target
-            
+
         return total_target_q_values
 
     def train_vdn_step(

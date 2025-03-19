@@ -9,7 +9,8 @@ import pandas as pd
 
 # from drqn import DRQNAgent as MyAgent
 # from idrqn import IDRQNAgent as MyAgent
-from rvdn import VDNAgent as MyAgent
+# from rvdn import VDNAgent as MyAgent
+from rqmix import QMIXAgent as MyAgent
 from env import MazeEnv
 
 
@@ -122,7 +123,7 @@ def train(config_path: str) -> MyAgent:
 
             # Update agent policy
             done = terminated or truncated or (total_reward < -20_000)
-            agent.update_policy(state, actions, rewards, next_state, done)
+            agent.update_policy(state, actions, rewards, next_state, done, env)
             state = next_state
 
             # Pause
