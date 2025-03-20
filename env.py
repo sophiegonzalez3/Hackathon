@@ -6,7 +6,8 @@ import time
 from gymnasium import spaces
 from collections import deque
 from typing import Tuple, List, Set, Optional, Union, Dict
-from reward import compute_reward, a_star
+from reward import compute_reward
+from astar import a_star
 
 class MazeEnv(gym.Env):
 
@@ -356,15 +357,15 @@ class MazeEnv(gym.Env):
                                                    self.deactivated_agents, self.goal_area,
                                                    )
         if evacuated_agents != self.evacuated_agents:
-            self.evacuated_agents = evacuated_agents    
+            self.evacuated_agents = evacuated_agents
 
         return rewards
 
 
     def step(self, actions):
         self.current_step += 1
-        with open('reward_log.txt', 'a') as log_file:
-            log_file.write(f"\n#### \n Step {self.current_step}: Reward CALL\n ####\n")
+        # with open('reward_log.txt', 'a') as log_file:
+            # log_file.write(f"\n#### \n Step {self.current_step}: Reward CALL\n ####\n")
         
         # Store the actual state for reward computation
         old_positions = [pos.copy() for pos in self.agent_positions]
