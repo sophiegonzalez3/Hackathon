@@ -1,12 +1,17 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from models import DRQNNetwork, MixingNetwork
 from bufferqmix import ReplayMemory
 from env import MazeEnv
+from models import DRQNNetwork, MixingNetwork
+from stateprocessing import (
+    central_state_dynamic,
+    central_state_static,
+    rotate_state,
+    rotate_agent_other_state,
+)
 
 
 class QMIXAgent:
@@ -108,8 +113,9 @@ class QMIXAgent:
         print(self.policy_net)
         print(self.mixer)
 
-    def preprocess_state(self, state_list: list) -> tuple[torch.Tensor, torch.Tensor]:
-        ...
+    def preprocess_state(self, state_list: list) -> list:
+        rotated_state_list = rotate_state(state_list)
+        return np.vstack(rotated_state_list).astype(np.float32)
 
     def get_action(self, state_list: list, evaluation: bool = False):
         if evaluation:
@@ -121,10 +127,16 @@ class QMIXAgent:
         if self.rng.random() < epsilon:
             return self.rng.choice(self.action_size, size=self.num_agents).tolist()
 
+        preprocessed_state_list = self.preprocess_state(state_list)
         with torch.no_grad():
             actions = []
-            for agent_id, state in enumerate(state_list):
-                state_tensor = torch.from_numpy(state).to(self.device).view((1, 1, -1))  # batch / step
+            for agent_id, state in enumerate(preprocessed_state_list):
+                state_tensor = (
+                    torch
+                    .from_numpy(state)
+                    .to(device=self.device, dtype=torch.float32)
+                    .view((1, 1, -1))  # batch / step / state_size
+                )
                 q_values, self.hidden_states[agent_id] = self.policy_net(
                     state_tensor, self.hidden_states[agent_id]
                 )
@@ -179,14 +191,25 @@ class QMIXAgent:
         done: bool,
         env: MazeEnv,
     ) -> None:
+        preprocessed_states_list = self.preprocess_state(states_list)
+        preprocessed_next_states_list = self.preprocess_state(next_states_list)
         # Create global state for QMIX by concatenating all agent states
-        central_state = self.extract_central_state(states_list, env)
-        next_central_state = self.extract_central_state(next_states_list, env)
+        central_state = self.extract_central_state(
+            preprocessed_states_list, env
+        )
+        next_central_state = self.extract_central_state(
+            preprocessed_next_states_list, env
+        )
 
         # Store transitions with global state
         self.store_transition(
-            states_list, actions_list, rewards_list, next_states_list,
-            done, central_state, next_central_state
+            preprocessed_states_list,
+            actions_list,
+            rewards_list,
+            preprocessed_next_states_list,
+            done,
+            central_state,
+            next_central_state
         )
 
         # Sample from memory

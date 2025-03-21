@@ -7,6 +7,6 @@
   "max_lidar_dist_main": 5,
   "max_lidar_dist_second": 3,
   "max_episodes": 200,
-  "max_episode_steps": 100,
+  "max_episode_steps": 200,
   "render_mode": null
 }
