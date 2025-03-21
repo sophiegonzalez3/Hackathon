@@ -39,33 +39,6 @@ def generate_scenarios(num_scenarios):
 
     return scenario_list
 
-'''def train_scenarios(agent):
-    scenario_paths = sorted([
-        os.path.join("eval_configs", f)
-        for f in os.listdir("eval_configs") if f.startswith("config_")
-    ])
-
-    all_rewards_per_scenario = []
-    trained_agents = []
-
-    for i, config_path in enumerate(scenario_paths, 1):
-        print(f"\nEntrainement sur scenario {i}: {config_path}")
-
-        # Entraînement sur le scénario
-        trained_agent, all_rewards = simulate.train(config_path, agent)
-
-        print(f"\nMoyenne des recompenses obtenues pour le scenario {i} : {np.mean(all_rewards):.2f}")
-
-        trained_agents.append(trained_agent)
-        all_rewards_per_scenario.append(all_rewards)
-
-    return trained_agents, all_rewards_per_scenario'''
-
-import os
-import re
-import numpy as np
-import simulate  # Assure-toi que ton simulate.py est bien importé
-
 def train_scenarios(agent):
     def extract_number(filename):
         match = re.search(r"config_(\d+)", filename)
