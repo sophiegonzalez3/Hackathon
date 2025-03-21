@@ -26,7 +26,7 @@ def generate_scenarios(num_scenarios):
             "grid_size": int(np.round(np.interp(fraction, [0, 1], config_ranges["grid_size"]))),
             "walls_proportion": round(np.interp(fraction, [0, 1], config_ranges["walls_proportion"]), 2),
             "num_dynamic_obstacles": int(np.round(np.interp(fraction, [0, 1], config_ranges["num_dynamic_obstacles"]))),
-            "num_agents": int(np.round(np.interp(fraction, [0, 1], config_ranges["num_agents"])))
+            "num_agents": int(np.round(np.interp(fraction, [0, 1], config_ranges["num_agents"]))),
             "communication_range": int(np.round(np.interp(fraction, [0, 1], config_ranges["communication_range"]))),
             "max_lidar_dist_main": int(np.round(np.interp(fraction, [0, 1], config_ranges["max_lidar_dist_main"]))),
             "max_lidar_dist_second": int(np.round(np.interp(fraction, [0, 1], config_ranges["max_lidar_dist_second"]))), 
