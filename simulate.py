@@ -118,7 +118,7 @@ def train(config_path: str) -> MyAgent:
             total_reward += np.sum(rewards)
 
             # Update agent policy
-            done = terminated or truncated or (total_reward < -15000)
+            done = terminated or truncated
             agent.update_policy(actions, state, rewards, next_state, done, env)
             state = next_state
 
@@ -132,7 +132,7 @@ def train(config_path: str) -> MyAgent:
             )
 
             # Pause
-            time.sleep(0)
+            #time.sleep(0)
 
             # If the episode is terminated
             if done:
@@ -184,7 +184,7 @@ def evaluate(
 
         # Initial reset of the environment
         state, info = env.reset()
-        time.sleep(1)
+        #time.sleep(1)
 
         # Run evaluation for the specified number of episodes
         try:
@@ -206,7 +206,7 @@ def evaluate(
                 )
 
                 # Pause
-                time.sleep(1)
+                #time.sleep(1)
 
                 # If the episode is terminated
                 if terminated or truncated:
