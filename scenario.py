@@ -2,6 +2,7 @@ import json
 import numpy as np
 import os
 import simulate
+import matplotlib as plt
 
 def generate_scenarios(num_scenarios):
     config_ranges = {
