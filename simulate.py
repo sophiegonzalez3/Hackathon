@@ -87,7 +87,7 @@ def plot_cumulated_rewards(rewards: list, interval: int = 100):
     plt.show()
 
 
-def train(config_path: str) -> MyAgent:
+def train(config_path: str, agent: MyAgent) -> MyAgent:
     """
     Train an agent on the configured environment.
 
@@ -99,7 +99,7 @@ def train(config_path: str) -> MyAgent:
     """
 
     # Environment and agent configuration
-    env, agent, config = simulation_config(config_path)
+    env, _, config = simulation_config(config_path, new_agent=False)
     max_episodes = config.get("max_episodes")
 
     # Metrics to follow the performance
@@ -133,15 +133,23 @@ def train(config_path: str) -> MyAgent:
             if done:
                 print("\r")
                 # Display of the step information
+                all_rewards.append(total_reward)
+                num_rolling_reward = 10
+                rolling_reward = (
+                    (sum(all_rewards) / len(all_rewards))
+                    if len(all_rewards) < num_rolling_reward else
+                    sum(all_rewards[-num_rolling_reward:]) / num_rolling_reward
+                )
+
                 print(
                     f"\rEpisode {episode_count + 1}, Step {info['current_step']}, "
+                    f"Rolling reward: {rolling_reward:.2f}, "
                     f"Reward: {total_reward:.2f}, "
                     f"Evacuated: {len(info['evacuated_agents'])}, "
                     f"Deactivated: {len(info['deactivated_agents'])}",
                     end="",
                 )
                 episode_count += 1
-                all_rewards.append(total_reward)
                 total_reward = 0
 
                 if episode_count < max_episodes:

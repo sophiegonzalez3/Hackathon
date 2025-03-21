@@ -1,5 +1,3 @@
-import random
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -60,7 +58,7 @@ class DRQNNetwork(nn.Module):
 
 
 class MixingNetwork(nn.Module):
-    def __init__(self, num_agents, central_state_size, embedding_dim=128, hypernet_dim=128):
+    def __init__(self, num_agents, central_state_size, embedding_dim, hypernet_dim):
         super().__init__()
         self.num_agents = num_agents
         self.embedding_dim = embedding_dim
@@ -132,8 +130,27 @@ class MixingNetwork(nn.Module):
 
 
 class QMIXAgent:
-    def __init__(self, num_agents: int) -> None:
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(
+        self,
+        num_agents: int,
+        device: torch.device,
+        hidden_size: int = 64,
+        num_rnn_layers: int = 1,
+        qmix_embedding_size: int = 64,
+        qmix_hypernet_size: int = 64,
+        buffer_size: int = 1000,
+        batch_sequence_length: int = 20,
+        batch_size: int = 64,
+        lr: float = 1e-3,
+        gamma: float = 0.99,
+        epsilon: float = 1.0,
+        epsilon_end: float = 0.01,
+        epsilon_decay: float = 0.9995,
+        target_update_freq: int = 1,
+        tau: float = 5e-3,
+        gradient_clipping_value: float | None = None,
+    ) -> None:
+        self.device = device
         self.rng = np.random.default_rng()
         self.num_agents = num_agents
 
@@ -143,21 +160,24 @@ class QMIXAgent:
 
         self.individual_state_size = 10 * num_agents + 2
         self.central_state_size = 12 * num_agents + 901
-
         self.state_size = self.individual_state_size
         self.action_size = 7
-        self.hidden_size = 128
-        self.num_rnn_layers = 1
+        self.hidden_size = hidden_size
+        self.num_rnn_layers = num_rnn_layers
+        self.qmix_embedding_size = qmix_embedding_size
+        self.qmix_hypernet_size = qmix_hypernet_size
 
-        self.lr = 1e-3
-        self.gamma = 0.99
-        self.epsilon = 1.0
-        self.epsilon_end = 0.01
-        self.epsilon_decay = 0.9995
-        self.buffer_size = 1_000
-        self.sequence_length = 20
-        self.batch_size = 64
-        self.target_update_freq = 1
+        self.buffer_size = buffer_size
+        self.batch_sequence_length = batch_sequence_length
+        self.batch_size = batch_size
+
+        self.lr = lr
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.epsilon_end = epsilon_end
+        self.epsilon_decay = epsilon_decay
+        self.target_update_freq = target_update_freq
+        self.tau = tau
 
         # Initialize policy network for each agent
         self.policy_net = DRQNNetwork(
@@ -170,22 +190,38 @@ class QMIXAgent:
         self.target_net.eval()
 
         # Initialize mixing networks
-        self.mixer = MixingNetwork(num_agents, self.central_state_size).to(self.device)
-        self.target_mixer = MixingNetwork(num_agents, self.central_state_size).to(self.device)
+        self.mixer = MixingNetwork(
+            num_agents,
+            self.central_state_size,
+            self.qmix_embedding_size,
+            self.qmix_hypernet_size,
+        ).to(self.device)
+        self.target_mixer = MixingNetwork(
+            num_agents,
+            self.central_state_size,
+            self.qmix_embedding_size,
+            self.qmix_hypernet_size,
+        ).to(self.device)
         self.target_mixer.load_state_dict(self.mixer.state_dict())
         self.target_mixer.eval()
 
         # Optimizer for policy network and mixer
-        self.optimizer = optim.Adam(
-            list(self.policy_net.parameters()) + list(self.mixer.parameters()), 
+        self.optimizer = optim.AdamW(
+            list(self.policy_net.parameters()) + list(self.mixer.parameters()),
             lr=self.lr
         )
 
         # Create a memory buffer for QMIX
-        self.memory = ReplayMemory(self.buffer_size, self.sequence_length)
+        self.memory = ReplayMemory(
+            self.buffer_size,
+            sequence_length=self.batch_sequence_length,
+        )
+
+        self.gradient_clipping_value = gradient_clipping_value
 
         # Hidden states for each agent
         self.hidden_states = [None for _ in range(num_agents)]
+        self.episode_counter = 0
         self.steps_done = 0
 
         print("Using QMIX agent with mixer network")
@@ -220,6 +256,7 @@ class QMIXAgent:
 
     def new_episode(self) -> None:
         """Reset hidden states and memories at the beginning of an episode"""
+        self.episode_counter += 1
         self.hidden_states = [None for _ in range(self.num_agents)]
         self.memory.new_episode()
 
@@ -286,11 +323,17 @@ class QMIXAgent:
 
         # Update target networks
         if self.steps_done % self.target_update_freq == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
-            self.target_mixer.load_state_dict(self.mixer.state_dict())
+            self.soft_update(self.policy_net, self.target_net)
+            self.soft_update(self.mixer, self.target_mixer)
 
         self.steps_done += 1
         return loss
+
+    def soft_update(self, model, target_model):
+        for param, target_param in zip(
+            model.parameters(), target_model.parameters(), strict=True
+        ):
+            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
 
     def store_transition(
         self, states: list, actions: list, rewards: list, next_states: list, done: bool,
@@ -357,7 +400,9 @@ class QMIXAgent:
         """Perform QMIX training step - optimize the joint action-value function"""
 
         # Compute joint target Q value using target mixer
-        target_q = self.compute_qmix_target(rewards, next_states, next_central_states, dones)
+        target_q = self.compute_qmix_target(
+            rewards, next_states, next_central_states, dones
+        )
 
         # Compute individual current Q values for each agent
         agent_q_values_list = []
@@ -383,9 +428,15 @@ class QMIXAgent:
         self.optimizer.zero_grad()
         loss.backward()
 
-        # Apply gradient clipping
-        # torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10)
-        # torch.nn.utils.clip_grad_norm_(self.mixer.parameters(), 10)
+        if self.gradient_clipping_value is not None:
+            torch.nn.utils.clip_grad_norm_(
+                self.policy_net.parameters(),
+                self.gradient_clipping_value,
+            )
+            torch.nn.utils.clip_grad_norm_(
+                self.mixer.parameters(),
+                self.gradient_clipping_value,
+            )
 
         self.optimizer.step()
 
