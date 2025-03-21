@@ -278,19 +278,20 @@ def rotate_agent_other_state(
         not is_goal_right and is_goal_bottom
     ):  # Goal is bottom-left, rotate 90° counter-clockwise
         # Swap and flip coordinates
+        new_x = grid_size - y
+        new_y = x
+        # Adjust orientation (rotate 90° clockwise)
+        new_orientation = (orientation + 1) % 4
+    
+    elif (
+        is_goal_right and not is_goal_bottom
+    ):  # Goal is top-right, rotate 90° clockwise
+        # Swap and flip coordinates
         new_x = y
         new_y = grid_size - x
         # Adjust orientation (rotate 90° counter-clockwise)
         new_orientation = (orientation + 3) % 4
 
-    elif (
-        is_goal_right and not is_goal_bottom
-    ):  # Goal is top-right, rotate 90° clockwise
-        # Swap and flip coordinates
-        new_x = grid_size - y
-        new_y = x
-        # Adjust orientation (rotate 90° clockwise)
-        new_orientation = (orientation + 1) % 4
 
     else:  # Goal is bottom-right, no rotation needed
         new_x = x
@@ -312,9 +313,9 @@ def rotate_state(state: list):
     grid_size = np.max(
         state.flatten()
     )  ########## WARNING je suppose que c'est vrai et en plus que pour le goal pos est toujours la case la plus eloigne
-    # print("State len for agent 0 : " , len(state[0]))
-    # print("Deducted grid size : ", grid_size +1 )
-    # print("initial state : " , state)
+    print("State len for agent 0 : " , len(state[0]))
+    print("Deducted grid size : ", grid_size +1 )
+    print("initial state : " , state)
     goal_pos = agent_0[4:6]
     goal_center_x = goal_pos[0]
     goal_center_y = goal_pos[1]
@@ -324,7 +325,7 @@ def rotate_state(state: list):
     for agent_idx in range(num_agents):
         agent_state = state[agent_idx]
         if agent_state[0] == -1 or agent_state[1] == -1:  # Agent mort
-            # print("agent mort")
+            print("agent mort")
             complete_new_state[agent_idx] = agent_state
             continue
 
@@ -336,19 +337,20 @@ def rotate_state(state: list):
 
         # Rotate the state based on goal position to ensure goal is bottom right
         if not is_right and not is_bottom:  # Goal is in top-left, rotate 180°
-            # print("\nGoal is in top-left, rotate 180°")
+            print("\nGoal is in top-left, rotate 180°")
             # Flip coordinates
             new_x = grid_size - x
             new_y = grid_size - y
             new_goal_x = grid_size - goal_x
             new_goal_y = grid_size - goal_y
             # Adjust orientation (rotate 180°)
+            print(f"{new_x=}, {new_y=}, {new_goal_x=}, {new_goal_y=}, {grid_size=}")
             new_orientation = (orientation + 2) % 4
 
         elif (
             not is_right and is_bottom
         ):  # Goal is in bottom-left, rotate 90° counter clockwise
-            # print("\nGoal is in bottom-left, rotate 90° counter clockwise")
+            print("\nGoal is in bottom-left, rotate 90° counter clockwise")
             # Swap and flip coordinates
             new_x = grid_size - y
             new_y = x
@@ -361,7 +363,7 @@ def rotate_state(state: list):
             is_right and not is_bottom
         ):  # Goal is in top-right, rotate 90° clockwise
             # Swap and flip coordinates
-            # print("\nGoal is in top-right, rotate 90° clockwise")
+            print("\nGoal is in top-right, rotate 90° clockwise")
             new_x = y
             new_y = grid_size - x
             new_goal_x = goal_y
@@ -369,7 +371,7 @@ def rotate_state(state: list):
             # Adjust orientation (rotate 90° counter-clockwise)
             new_orientation = (orientation + 3) % 4
         else:
-            # print("bottom-righ no change needed")
+            print("bottom-righ no change needed")
             new_x = x
             new_y = y
             new_goal_x = goal_x
@@ -384,10 +386,10 @@ def rotate_state(state: list):
             ),
             axis=0,
         )
-        # print(len(New_agent_state))
-        # print("Transform state : ", New_agent_state)
+        print(len(New_agent_state))
+        print("Transform state : ", New_agent_state)
         if len(agent_state) == 42:
-            # print("long agent2 : ", len(agent_state[12:22]))
+            print("long agent2 : ", len(agent_state[12:22]))
             agent_state_2 = rotate_agent_other_state(
                 agent_state[12:22], is_right, is_bottom, grid_size
             )
@@ -401,7 +403,7 @@ def rotate_state(state: list):
                 (New_agent_state, agent_state_2, agent_state_3, agent_state_4),
                 axis=0,
             )
-            # print("final length state agent: ", len(complete_new_state_agent))
+            print("final length state agent: ", len(complete_new_state_agent))
         if len(agent_state) == 22:
             agent_state_2 = rotate_agent_other_state(
                 agent_state[12:22], is_right, is_bottom, grid_size

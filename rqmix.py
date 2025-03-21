@@ -116,7 +116,8 @@ class QMIXAgent:
     def preprocess_state(self, state_list: list) -> list:
         rotated_state_list = rotate_state(state_list)
         return np.vstack(rotated_state_list).astype(np.float32)
-
+        # return state_list
+    
     def get_action(self, state_list: list, evaluation: bool = False):
         if evaluation:
             epsilon = 0
