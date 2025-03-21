@@ -228,11 +228,10 @@ class QMIXAgent:
         print(self.policy_net)
         print(self.mixer)
 
-    def get_action(self, state_list: list, evaluation: bool = False):
-        # Convert all states to batch for efficient processing
-        states_batch = np.array(state_list)
-        states_tensor = torch.from_numpy(states_batch).to(self.device).unsqueeze(1)
+    def preprocess_state(self, state_list: list) -> tuple[torch.Tensor, torch.Tensor]:
+        ...
 
+    def get_action(self, state_list: list, evaluation: bool = False):
         if evaluation:
             epsilon = 0
         else:
@@ -242,12 +241,12 @@ class QMIXAgent:
         if self.rng.random() < epsilon:
             return self.rng.choice(self.action_size, size=self.num_agents).tolist()
 
-        # Use the shared policy net for all agents
         with torch.no_grad():
             actions = []
-            for agent_id in range(self.num_agents):
+            for agent_id, state in enumerate(state_list):
+                state_tensor = torch.from_numpy(state).to(self.device).view((1, 1, -1))  # batch / step
                 q_values, self.hidden_states[agent_id] = self.policy_net(
-                    states_tensor[agent_id:agent_id+1], self.hidden_states[agent_id]
+                    state_tensor, self.hidden_states[agent_id]
                 )
                 action = q_values.squeeze(0).squeeze(0).argmax().cpu().item()
                 actions.append(action)
