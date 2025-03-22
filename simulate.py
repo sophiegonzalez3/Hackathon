@@ -10,6 +10,9 @@ from env import MazeEnv
 from agent import MyAgent
 
 
+SLEEP_TIME = 0
+
+
 def simulation_config(config_path: str, new_agent: bool = True) -> Tuple[MazeEnv, Optional[MyAgent], Dict]:
     """
     Configure the environment and optionally an agent using a JSON configuration file.
@@ -91,7 +94,7 @@ def train(config_path: str) -> MyAgent:
     
     # Initial reset of the environment
     state, info = env.reset()
-    time.sleep(1)
+    time.sleep(SLEEP_TIME)
 
     try:
         while episode_count < max_episodes:
@@ -112,7 +115,7 @@ def train(config_path: str) -> MyAgent:
                   f"Deactivated: {len(info['deactivated_agents'])}", end='')
             
             # Pause
-            time.sleep(1)
+            time.sleep(SLEEP_TIME)
             
             # If the episode is terminated
             if terminated or truncated:
@@ -162,7 +165,7 @@ def evaluate(configs_paths: list, trained_agent: MyAgent, num_episodes: int = 10
         
         # Initial reset of the environment
         state, info = env.reset()
-        time.sleep(1) 
+        time.sleep(SLEEP_TIME) 
    
         # Run evaluation for the specified number of episodes
         try:
@@ -181,7 +184,7 @@ def evaluate(configs_paths: list, trained_agent: MyAgent, num_episodes: int = 10
                     f"Deactivated: {len(info['deactivated_agents'])}", end='')
             
                 # Pause
-                time.sleep(1)
+                time.sleep(SLEEP_TIME)
 
                 # If the episode is terminated
                 if terminated or truncated:

@@ -1,0 +1,1 @@
+{"state_size": 42, "action_size": 7, "hidden_size": 512, "num_recurrent_layers": 2}
