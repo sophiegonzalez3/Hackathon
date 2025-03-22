@@ -45,7 +45,7 @@ def central_state_static(
     # Fill the static environment matrix (channel 0)
     MAX_GRID_SIZE = 30
     needs_padding = grid_size < MAX_GRID_SIZE
-    print("\nGoal area : ", goal_area)
+    # print("\nGoal area : ", goal_area)
 
     static_matrix = torch.ones(
         (grid_size, grid_size), device=device
@@ -78,18 +78,19 @@ def central_state_static(
 
     # Rotate the matrix based on goal position to ensure goal is bottom right
     if not is_right and not is_bottom:  # Goal is in top-left, rotate 180°
-        print("Static Goal is in top-left, rotate 180°\n")
+        # print("Static Goal is in top-left, rotate 180°\n")
         static_matrix = torch.flip(static_matrix, [0, 1])
     elif (
         not is_right and is_bottom
     ):  # Goal is in bottom-left, rotate 90° counter clockwise
         static_matrix = torch.rot90(static_matrix, k=1, dims=[0, 1])
-        print("Static Goal is in bottom-left, rotate 90° counter-clockwise\n")
+        # print("Static Goal is in bottom-left, rotate 90° counter-clockwise\n")
     elif is_right and not is_bottom:  # Goal is in top-right, rotate 90° clockwise
         static_matrix = torch.rot90(static_matrix, k=-1, dims=[0, 1])
-        print("Static Goal is in top-right, rotate 90° clockwise\n")
+        # print("Static Goal is in top-right, rotate 90° clockwise\n")
     else:
-        print("Static bottom-righ\n")
+        pass
+        # print("Static bottom-righ\n")
     # If goal is already bottom-right, no rotation needed
 
     if needs_padding:
@@ -256,7 +257,7 @@ def rotate_agent_other_state(
         list: Transformed other agent state
     """
     if len(agent_state) != 10:
-        print("agent state dim : ", agent_state)
+        # print("agent state dim : ", agent_state)
         raise ValueError
     if agent_state[0] == -1:  # agent not in range or dead
         return agent_state
@@ -313,9 +314,9 @@ def rotate_state(state: list):
     grid_size = np.max(
         state.flatten()
     )  ########## WARNING je suppose que c'est vrai et en plus que pour le goal pos est toujours la case la plus eloigne
-    print("State len for agent 0 : " , len(state[0]))
-    print("Deducted grid size : ", grid_size +1 )
-    print("initial state : " , state)
+    # print("State len for agent 0 : " , len(state[0]))
+    # print("Deducted grid size : ", grid_size +1 )
+    # print("initial state : " , state)
     goal_pos = agent_0[4:6]
     goal_center_x = goal_pos[0]
     goal_center_y = goal_pos[1]
@@ -325,7 +326,7 @@ def rotate_state(state: list):
     for agent_idx in range(num_agents):
         agent_state = state[agent_idx]
         if agent_state[0] == -1 or agent_state[1] == -1:  # Agent mort
-            print("agent mort")
+            # print("agent mort")
             complete_new_state[agent_idx] = agent_state
             continue
 
@@ -337,20 +338,20 @@ def rotate_state(state: list):
 
         # Rotate the state based on goal position to ensure goal is bottom right
         if not is_right and not is_bottom:  # Goal is in top-left, rotate 180°
-            print("\nGoal is in top-left, rotate 180°")
+            # print("\nGoal is in top-left, rotate 180°")
             # Flip coordinates
             new_x = grid_size - x
             new_y = grid_size - y
             new_goal_x = grid_size - goal_x
             new_goal_y = grid_size - goal_y
             # Adjust orientation (rotate 180°)
-            print(f"{new_x=}, {new_y=}, {new_goal_x=}, {new_goal_y=}, {grid_size=}")
+            # print(f"{new_x=}, {new_y=}, {new_goal_x=}, {new_goal_y=}, {grid_size=}")
             new_orientation = (orientation + 2) % 4
 
         elif (
             not is_right and is_bottom
         ):  # Goal is in bottom-left, rotate 90° counter clockwise
-            print("\nGoal is in bottom-left, rotate 90° counter clockwise")
+            # print("\nGoal is in bottom-left, rotate 90° counter clockwise")
             # Swap and flip coordinates
             new_x = grid_size - y
             new_y = x
@@ -363,7 +364,7 @@ def rotate_state(state: list):
             is_right and not is_bottom
         ):  # Goal is in top-right, rotate 90° clockwise
             # Swap and flip coordinates
-            print("\nGoal is in top-right, rotate 90° clockwise")
+            # print("\nGoal is in top-right, rotate 90° clockwise")
             new_x = y
             new_y = grid_size - x
             new_goal_x = goal_y
@@ -371,7 +372,7 @@ def rotate_state(state: list):
             # Adjust orientation (rotate 90° counter-clockwise)
             new_orientation = (orientation + 3) % 4
         else:
-            print("bottom-righ no change needed")
+            # print("bottom-righ no change needed")
             new_x = x
             new_y = y
             new_goal_x = goal_x
@@ -386,10 +387,10 @@ def rotate_state(state: list):
             ),
             axis=0,
         )
-        print(len(New_agent_state))
-        print("Transform state : ", New_agent_state)
+        # print(len(New_agent_state))
+        # print("Transform state : ", New_agent_state)
         if len(agent_state) == 42:
-            print("long agent2 : ", len(agent_state[12:22]))
+            # print("long agent2 : ", len(agent_state[12:22]))
             agent_state_2 = rotate_agent_other_state(
                 agent_state[12:22], is_right, is_bottom, grid_size
             )
@@ -403,7 +404,7 @@ def rotate_state(state: list):
                 (New_agent_state, agent_state_2, agent_state_3, agent_state_4),
                 axis=0,
             )
-            print("final length state agent: ", len(complete_new_state_agent))
+            # print("final length state agent: ", len(complete_new_state_agent))
         if len(agent_state) == 22:
             agent_state_2 = rotate_agent_other_state(
                 agent_state[12:22], is_right, is_bottom, grid_size
@@ -443,9 +444,9 @@ def extract_central_state(
         env.goal_area,
         device,
     )
-    static_matrix = torch.ones(
-        (grid_size, grid_size), device=device, dtype=torch.float32
-    ) 
+    # static_matrix = torch.ones(
+    #     (grid_size, grid_size), device=device, dtype=torch.float32
+    # ) 
     # Merging both dyanmic and static
     merged_matrix = torch.zeros_like(dynamic_matrix, device=device).float()
     # Create masks for different conditions

@@ -98,6 +98,8 @@ def train(config_path: str, agent: MyAgent) -> MyAgent:
         MyAgent: The trained agent.
     """
 
+    SLEEP_TIME = 0
+
     # Environment and agent configuration
     env, _, config = simulation_config(config_path, new_agent=False)
     max_episodes = config.get("max_episodes")
@@ -109,8 +111,9 @@ def train(config_path: str, agent: MyAgent) -> MyAgent:
 
     # Initial reset of the environment
     state, info = env.reset()
+    initial_goal = state[0][4:6]
     agent.new_episode()
-    # time.sleep(1)
+    time.sleep(SLEEP_TIME)
 
     try:
         while episode_count < max_episodes:
@@ -127,7 +130,7 @@ def train(config_path: str, agent: MyAgent) -> MyAgent:
             state = next_state
 
             # Pause
-            # time.sleep(1)
+            time.sleep(SLEEP_TIME)
 
             # If the episode is terminated
             if done:
@@ -154,6 +157,8 @@ def train(config_path: str, agent: MyAgent) -> MyAgent:
 
                 if episode_count < max_episodes:
                     state, info = env.reset()
+                    initial_goal = state[0][4:6]
+                    print(f"\n{initial_goal=}")
                     agent.new_episode()
 
     except KeyboardInterrupt:
@@ -180,6 +185,8 @@ def evaluate(
         pd.DataFrame: A DataFrame containing evaluation metrics for each episode and configuration.
     """
 
+    SLEEP_TIME = 0
+
     # Evaluation results
     all_results = pd.DataFrame()
 
@@ -196,7 +203,7 @@ def evaluate(
 
         # Initial reset of the environment
         state, info = env.reset()
-        time.sleep(1)
+        time.sleep(SLEEP_TIME)
 
         # Run evaluation for the specified number of episodes
         try:
@@ -218,7 +225,7 @@ def evaluate(
                 )
 
                 # Pause
-                time.sleep(1)
+                time.sleep(SLEEP_TIME)
 
                 # If the episode is terminated
                 if terminated or truncated:

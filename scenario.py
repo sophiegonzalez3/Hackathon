@@ -16,7 +16,7 @@ def generate_scenarios(num_scenarios):
         "max_lidar_dist_second": (1, 3),
         "max_episodes": (10,10), 
         "max_episode_steps": (100,500),
-        "render_mode": ("human","human")
+        "render_mode": ("null","null")
     }
 
     scenario_list = []
