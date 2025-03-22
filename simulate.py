@@ -87,6 +87,45 @@ def plot_cumulated_rewards(rewards: list, interval: int = 100):
     plt.show()
 
 
+def run_episode_for_imitation_learning(config: dict[str, int], agent):
+    env = MazeEnv(
+        size=config.get("grid_size"),  # Grid size
+        walls_proportion=config.get("walls_proportion"),  # Walls proportion in the grid
+        num_dynamic_obstacles=config.get(
+            "num_dynamic_obstacles"
+        ),  # Number of dynamic obstacles
+        num_agents=config.get("num_agents"),  # Number of agents
+        communication_range=config.get(
+            "communication_range"
+        ),  # Maximum distance for agent communications
+        max_lidar_dist_main=config.get(
+            "max_lidar_dist_main"
+        ),  # Maximum distance for main LIDAR scan
+        max_lidar_dist_second=config.get(
+            "max_lidar_dist_second"
+        ),  # Maximum distance for secondary LIDAR scan
+        max_episode_steps=config.get(
+            "max_episode_steps"
+        ),  # Number of steps before episode termination
+        render_mode=config.get("render_mode", None),
+        seed=config.get("seed", None),  # Seed for reproducibility
+    )
+    state_list = []
+    action_list = []
+    state, info = env.reset()
+    done = False
+    step = 0
+
+    while not done:
+        actions = agent.get_action(state)
+        state_list.append(state)
+        action_list.append(actions)
+        state, _, terminated, truncated, _ = env.step(actions)
+        step += 1
+        done = terminated or truncated or (step >= config["max_episode_steps"])
+    return state_list, action_list
+
+
 def train(config_path: str, agent: MyAgent) -> MyAgent:
     """
     Train an agent on the configured environment.

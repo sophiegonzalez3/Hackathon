@@ -1,3 +1,6 @@
+import json
+import os
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -9,14 +12,14 @@ class DRQNNetwork(nn.Module):
         state_size: int,
         hidden_size: int,
         action_size: int,
-        num_layers: int,
+        num_recurrent_layers: int,
     ) -> None:
         super().__init__()
 
         self.state_size = state_size
         self.action_size = action_size
-        self.hidden_dim = hidden_size
-        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+        self.num_recurrent_layers = num_recurrent_layers
 
         self.feature_layer = nn.Sequential(
             nn.Linear(state_size, hidden_size),
@@ -26,7 +29,7 @@ class DRQNNetwork(nn.Module):
         self.gru = nn.GRU(
             input_size=hidden_size,
             hidden_size=hidden_size,
-            num_layers=num_layers,
+            num_layers=num_recurrent_layers,
             batch_first=True,
         )
         self.output_layer = nn.Linear(hidden_size, action_size)
@@ -37,12 +40,11 @@ class DRQNNetwork(nn.Module):
         batch_size = state.size(0)
         sequence_length = state.size(1)
 
-        state = state.view(-1, state.size(-1))
         z1 = self.feature_layer(state)
         z1 = z1.view(batch_size, sequence_length, -1)
 
         if hidden_state is None:
-            h0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(
+            h0 = torch.zeros(self.num_recurrent_layers, batch_size, self.hidden_size).to(
                 state.device
             )
             hidden_state = h0
@@ -50,6 +52,41 @@ class DRQNNetwork(nn.Module):
         z2, hidden_state = self.gru(z1, hidden_state)
         action = self.output_layer(z2)
         return action, hidden_state
+
+    def save(self, path):
+        architecture = {
+            'state_size': self.state_size,
+            'action_size': self.action_size,
+            'hidden_size': self.hidden_size,
+            'num_recurrent_layers': self.num_recurrent_layers,
+        }
+        
+        with open(os.path.join(path, 'architecture.json'), 'w') as f:
+            json.dump(architecture, f)
+        
+        weights_path = os.path.join(path, 'weights.pt')
+        torch.save(self.state_dict(), weights_path)
+        
+        print(f"Model saved to {path}")
+    
+    @classmethod
+    def load(cls, path):
+        architecture_path = os.path.join(path, 'architecture.json')
+        with open(architecture_path, 'r') as f:
+            architecture = json.load(f)
+        
+        model = cls(
+            state_size=architecture['state_size'],
+            action_size=architecture['action_size'],
+            hidden_size=architecture['hidden_size'],
+            num_recurrent_layers=architecture['num_recurrent_layers'],
+        )
+
+        weights_path = os.path.join(path, 'weights.pt')
+        model.load_state_dict(torch.load(weights_path, weights_only=True))
+        
+        model.eval()
+        return model
 
 
 class MixingNetwork(nn.Module):

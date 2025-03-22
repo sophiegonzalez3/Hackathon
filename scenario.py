@@ -5,6 +5,7 @@ import re
 import simulate
 import matplotlib as plt
 
+
 def generate_scenarios(num_scenarios):
     config_ranges = {
         "grid_size": (10, 30),
@@ -14,15 +15,15 @@ def generate_scenarios(num_scenarios):
         "communication_range": (5, 10),
         "max_lidar_dist_main": (5, 5),  # Fixe
         "max_lidar_dist_second": (1, 3),
-        "max_episodes": (10,10), 
-        "max_episode_steps": (100,500),
-        "render_mode": ("null","null")
+        "max_episodes": (10, 10),
+        "max_episode_steps": (100, 500),
+        "render_mode": ("null", "null")
     }
 
     scenario_list = []
 
     for i in range(num_scenarios):
-        fraction = i / (num_scenarios - 1) 
+        fraction = i / (num_scenarios - 1)
 
         scenario = {
             "grid_size": int(np.round(np.interp(fraction, [0, 1], config_ranges["grid_size"]))),
@@ -40,6 +41,7 @@ def generate_scenarios(num_scenarios):
         scenario_list.append(scenario)
 
     return scenario_list
+
 
 def train_scenarios(agent):
     def extract_number(filename):
