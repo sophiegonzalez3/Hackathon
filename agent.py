@@ -4,9 +4,9 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-from bufferqmix import ReplayMemory
+from replaymemory import ReplayMemory
 from env import MazeEnv
-from models import DRQNNetwork, MixingNetwork
+from models import DRQNetwork, MixingNetwork
 
 
 class MyAgent:
@@ -14,7 +14,7 @@ class MyAgent:
         self,
         num_agents: int,
         device: torch.device,
-        policy_net: DRQNNetwork,
+        policy_net: DRQNetwork,
         mixing_net: MixingNetwork,
         buffer_size: int = 1000,
         batch_sequence_length: int = 20,
@@ -82,6 +82,10 @@ class MyAgent:
         self.episode_counter = 0
         self.steps_done = 0
 
+        # Guestimates based on reward
+        self.reward_max = 10
+        self.reward_min = -1000
+
         print("Using QMIX agent with mixer network")
         print(self.policy_net)
         print(self.mixer)
@@ -90,6 +94,10 @@ class MyAgent:
         # rotated_state_list = rotate_state(state_list)
         # return np.vstack(rotated_state_list).astype(np.float32)
         return state_list
+
+    def normalize_rewards(self, rewards_list):
+        batch_rewards = np.array(rewards_list)
+        return (batch_rewards - self.reward_min) / (self.reward_max - self.reward_min)
 
     def get_action(self, state_list: list, evaluation: bool = False):
         if evaluation:
@@ -175,11 +183,13 @@ class MyAgent:
             preprocessed_next_states_list, env
         )
 
+        preprocessed_rewards = self.normalize_rewards(rewards_list)
+
         # Store transitions with global state
         self.store_transition(
             preprocessed_states_list,
             actions_list,
-            rewards_list,
+            preprocessed_rewards,
             preprocessed_next_states_list,
             done,
             central_state,
@@ -317,29 +327,3 @@ class MyAgent:
         self.optimizer.step()
 
         return loss.item()
-
-    def save(self, filename):
-        """Save model weights and agent state"""
-        torch.save(
-            {
-                "policy_net": self.policy_net.state_dict(),
-                "target_net": self.target_net.state_dict(),
-                "mixer": self.mixer.state_dict(),
-                "target_mixer": self.target_mixer.state_dict(),
-                "optimizer": self.optimizer.state_dict(),
-                "epsilon": self.epsilon,
-                "steps_done": self.steps_done,
-            },
-            filename,
-        )
-
-    def load(self, filename):
-        """Load model weights and agent state"""
-        checkpoint = torch.load(filename)
-        self.policy_net.load_state_dict(checkpoint["policy_net"])
-        self.target_net.load_state_dict(checkpoint["target_net"])
-        self.mixer.load_state_dict(checkpoint["mixer"])
-        self.target_mixer.load_state_dict(checkpoint["target_mixer"])
-        self.optimizer.load_state_dict(checkpoint["optimizer"])
-        self.epsilon = checkpoint["epsilon"]
-        self.steps_done = checkpoint["steps_done"]

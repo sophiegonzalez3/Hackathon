@@ -57,19 +57,20 @@ def plot_cumulated_rewards(rewards: list, interval: int = 100):
         rewards (list): List of total rewards per episode.
         interval (int): Interval between ticks on the x-axis (default is 100).
     """
-    plt.figure(figsize=(10, 6))
-    plt.plot(range(1, len(rewards)+1), rewards, color='blue', marker='o', linestyle='-')
-    plt.title('Total Cumulated Rewards per Episode')
-    plt.xlabel('Episodes')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(range(1, len(rewards)+1), rewards, color='blue', marker='o', linestyle='-')
+    ax.set_title('Total Cumulated Rewards per Episode')
+    ax.set_xlabel('Episodes')
     
     # Adjust x-ticks to display every 'interval' episodes
     xticks = range(1, len(rewards)+1, interval)
-    plt.xticks(xticks)
+    ax.set_xticks(xticks)
     
-    plt.ylabel('Cumulated Rewards')
-    plt.grid(True)
-    plt.savefig('reward_curve_per_episode.png', dpi=300)
-    plt.show()
+    ax.set_ylabel('Cumulated Rewards')
+    # plt.grid(True)
+    fig.savefig('reward_curve_per_episode.png', dpi=300)
+    # plt.show()
+    return fig
 
 
 def train(config_path: str) -> MyAgent:

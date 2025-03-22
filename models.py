@@ -101,7 +101,7 @@ class MixingNetwork(nn.Module):
         self.hyper_w1 = nn.Sequential(
             nn.Linear(central_state_size, hypernet_size),
             nn.ELU(),
-            nn.Linear(hypernet_size, num_agents * hypernet_size)
+            nn.Linear(hypernet_size, num_agents * embedding_size)
         )
 
         # Hypernetwork that produces the weights for the second layer of the mixing network
@@ -131,35 +131,25 @@ class MixingNetwork(nn.Module):
         """
         batch_size = agent_q_values.size(0)
         seq_len = agent_q_values.size(1)
-
+        
         # Reshape states for processing
         central_states = central_states.reshape(-1, self.central_state_size)  # [batch_size * seq_len, state_size]
 
         # Get weights and bias from hypernetworks
-        w1 = self.hyper_w1(central_states)  # [batch_size * seq_len, num_agents * embedding_size]
-        w1 = w1.view(-1, self.num_agents, self.embedding_size)  # [batch_size * seq_len, num_agents, embedding_size]
+        w1 = torch.abs(self.hyper_w1(central_states))  # [batch_size * seq_len, num_agents * embedding_size]
         b1 = self.hyper_b1(central_states)  # [batch_size * seq_len, embedding_size]
 
-        w2 = self.hyper_w2(central_states)  # [batch_size * seq_len, embedding_size]
-        w2 = w2.view(-1, self.embedding_size, 1)  # [batch_size * seq_len, embedding_size, 1]
+        w2 = torch.abs(self.hyper_w2(central_states))  # [batch_size * seq_len, embedding_size]
         b2 = self.hyper_b2(central_states)  # [batch_size * seq_len, 1]
 
-        # Reshape agent q values for processing
-        agent_q_values = agent_q_values.reshape(-1, 1, self.num_agents)  # [batch_size * seq_len, 1, num_agents]
+        w1 = w1.view(-1, self.num_agents, self.embedding_size)
+        w2 = w2.view(-1, self.embedding_size, 1)
 
-        # Apply the mixing network with non-linearities
-        # First layer: ensure positive weights for monotonicity
-        w1 = torch.abs(w1)
+        agent_q_values = agent_q_values.reshape(-1, 1, self.num_agents)  # [batch_size * seq_len, 1, num_agents]
         hidden = F.relu(torch.bmm(agent_q_values, w1) + b1.unsqueeze(1))  # [batch_size * seq_len, 1, embedding_size]
 
-        # Second layer: ensure positive weights for monotonicity
-        w2 = torch.abs(w2)
         joint_q = torch.bmm(hidden, w2) + b2.unsqueeze(1)  # [batch_size * seq_len, 1, 1]
-
-        # Reshape back
-        joint_q = joint_q.view(batch_size, seq_len, 1)  # [batch_size, seq_len, 1]
-
-        return joint_q
+        return joint_q.view(batch_size, seq_len, 1)  # [batch_size, seq_len, 1]
 
     def save(self, path):
         architecture = {
