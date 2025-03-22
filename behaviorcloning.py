@@ -3,35 +3,13 @@ import torch
 import torch.nn.functional as F
 from torch import optim
 
-from env import MazeEnv
 from heuristic import AstarAgent
 from models import DRQNetwork
+from scenario import sample_env
 
 
-def run_episode_for_behavior_cloning(config: dict[str, int]) -> tuple[list, list]:
-    env = MazeEnv(
-        size=config.get("grid_size"),  # Grid size
-        walls_proportion=config.get("walls_proportion"),  # Walls proportion in the grid
-        num_dynamic_obstacles=config.get(
-            "num_dynamic_obstacles"
-        ),  # Number of dynamic obstacles
-        num_agents=config.get("num_agents"),  # Number of agents
-        communication_range=config.get(
-            "communication_range"
-        ),  # Maximum distance for agent communications
-        max_lidar_dist_main=config.get(
-            "max_lidar_dist_main"
-        ),  # Maximum distance for main LIDAR scan
-        max_lidar_dist_second=config.get(
-            "max_lidar_dist_second"
-        ),  # Maximum distance for secondary LIDAR scan
-        max_episode_steps=config.get(
-            "max_episode_steps"
-        ),  # Number of steps before episode termination
-        render_mode=config.get("render_mode", None),
-        seed=config.get("seed", None),  # Seed for reproducibility
-    )
-
+def run_episode_for_behavior_cloning() -> tuple[list, list]:
+    env = sample_env()
     agent = AstarAgent()
 
     state_list = []
@@ -46,29 +24,15 @@ def run_episode_for_behavior_cloning(config: dict[str, int]) -> tuple[list, list
         action_list.append(actions)
         state, _, terminated, truncated, _ = env.step(actions)
         step += 1
-        done = terminated or truncated or (step >= config["max_episode_steps"])
+        done = terminated or truncated
+
+    env.close()
+
     return state_list, action_list
 
 
-def sample_config() -> dict[str, int | None]:
-    rng = np.random.default_rng()
-    return {
-        "grid_size": rng.integers(10, 31),
-        "walls_proportion": rng.uniform(0.1, 0.6),
-        "num_dynamic_obstacles": rng.integers(0, 5),
-        "num_agents": 4,
-        "communication_range": rng.integers(5, 10),
-        "max_lidar_dist_main": 5,
-        "max_lidar_dist_second": rng.integers(1, 3),
-        "max_episodes": 1,
-        "max_episode_steps": 500,
-        "render_mode": None
-    }
-
-
 def clone_step(policy_net: DRQNetwork, optimizer: optim.Optimizer, device: torch.device) -> float:
-    config = sample_config()
-    state_list, action_list = run_episode_for_behavior_cloning(config)
+    state_list, action_list = run_episode_for_behavior_cloning()
 
     state_array = np.stack(state_list)
     action_array = np.stack(action_list)

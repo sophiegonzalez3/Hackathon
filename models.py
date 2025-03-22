@@ -90,34 +90,35 @@ class DRQNetwork(nn.Module):
 
 
 class MixingNetwork(nn.Module):
-    def __init__(self, num_agents, central_state_size, embedding_dim, hypernet_dim):
+    def __init__(self, num_agents, central_state_size, embedding_size, hypernet_size):
         super().__init__()
         self.num_agents = num_agents
-        self.embedding_dim = embedding_dim
+        self.embedding_size = embedding_size
+        self.hypernet_size = hypernet_size
         self.central_state_size = central_state_size
 
         # Hypernetwork that produces the weights for the first layer of the mixing network
         self.hyper_w1 = nn.Sequential(
-            nn.Linear(central_state_size, hypernet_dim),
+            nn.Linear(central_state_size, hypernet_size),
             nn.ELU(),
-            nn.Linear(hypernet_dim, num_agents * embedding_dim)
+            nn.Linear(hypernet_size, num_agents * hypernet_size)
         )
 
         # Hypernetwork that produces the weights for the second layer of the mixing network
         self.hyper_w2 = nn.Sequential(
-            nn.Linear(central_state_size, hypernet_dim),
+            nn.Linear(central_state_size, hypernet_size),
             nn.ELU(),
-            nn.Linear(hypernet_dim, embedding_dim)
+            nn.Linear(hypernet_size, embedding_size)
         )
 
         # Hypernetwork that produces the bias for the first layer of the mixing network
-        self.hyper_b1 = nn.Linear(central_state_size, embedding_dim)
+        self.hyper_b1 = nn.Linear(central_state_size, embedding_size)
 
         # Hypernetwork that produces the bias for the second layer of the mixing network
         self.hyper_b2 = nn.Sequential(
-            nn.Linear(central_state_size, hypernet_dim),
+            nn.Linear(central_state_size, hypernet_size),
             nn.ELU(),
-            nn.Linear(hypernet_dim, 1)
+            nn.Linear(hypernet_size, 1)
         )
 
     def forward(self, agent_q_values, central_states):
@@ -135,12 +136,12 @@ class MixingNetwork(nn.Module):
         central_states = central_states.reshape(-1, self.central_state_size)  # [batch_size * seq_len, state_size]
 
         # Get weights and bias from hypernetworks
-        w1 = self.hyper_w1(central_states)  # [batch_size * seq_len, num_agents * embedding_dim]
-        w1 = w1.view(-1, self.num_agents, self.embedding_dim)  # [batch_size * seq_len, num_agents, embedding_dim]
-        b1 = self.hyper_b1(central_states)  # [batch_size * seq_len, embedding_dim]
+        w1 = self.hyper_w1(central_states)  # [batch_size * seq_len, num_agents * embedding_size]
+        w1 = w1.view(-1, self.num_agents, self.embedding_size)  # [batch_size * seq_len, num_agents, embedding_size]
+        b1 = self.hyper_b1(central_states)  # [batch_size * seq_len, embedding_size]
 
-        w2 = self.hyper_w2(central_states)  # [batch_size * seq_len, embedding_dim]
-        w2 = w2.view(-1, self.embedding_dim, 1)  # [batch_size * seq_len, embedding_dim, 1]
+        w2 = self.hyper_w2(central_states)  # [batch_size * seq_len, embedding_size]
+        w2 = w2.view(-1, self.embedding_size, 1)  # [batch_size * seq_len, embedding_size, 1]
         b2 = self.hyper_b2(central_states)  # [batch_size * seq_len, 1]
 
         # Reshape agent q values for processing
@@ -149,7 +150,7 @@ class MixingNetwork(nn.Module):
         # Apply the mixing network with non-linearities
         # First layer: ensure positive weights for monotonicity
         w1 = torch.abs(w1)
-        hidden = F.relu(torch.bmm(agent_q_values, w1) + b1.unsqueeze(1))  # [batch_size * seq_len, 1, embedding_dim]
+        hidden = F.relu(torch.bmm(agent_q_values, w1) + b1.unsqueeze(1))  # [batch_size * seq_len, 1, embedding_size]
 
         # Second layer: ensure positive weights for monotonicity
         w2 = torch.abs(w2)
@@ -164,8 +165,8 @@ class MixingNetwork(nn.Module):
         architecture = {
             'num_agents': self.num_agents,
             'central_state_size': self.central_state_size,
-            'embedding_dim': self.embedding_dim,
-            'hypernet_dim': self.hypernet_dim,
+            'embedding_size': self.embedding_size,
+            'hypernet_size': self.hypernet_size,
         }
 
         with open(os.path.join(path, 'architecture.json'), 'w') as f:
@@ -175,3 +176,22 @@ class MixingNetwork(nn.Module):
         torch.save(self.state_dict(), weights_path)
 
         print(f"Model saved to {path}")
+
+    @classmethod
+    def load(cls, path):
+        architecture_path = os.path.join(path, 'architecture.json')
+        with open(architecture_path, 'r') as f:
+            architecture = json.load(f)
+
+        model = cls(
+            num_agents=architecture['num_agents'],
+            central_state_size=architecture['central_state_size'],
+            embedding_size=architecture['embedding_size'],
+            hypernet_size=architecture['hypernet_size'],
+        )
+
+        weights_path = os.path.join(path, 'weights.pt')
+        model.load_state_dict(torch.load(weights_path, weights_only=True))
+
+        model.eval()
+        return model
