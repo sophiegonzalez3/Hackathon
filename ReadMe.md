@@ -95,7 +95,9 @@ When our initial QMIX implementation failed to converge, we enhanced the agent's
 In an attempt to simplify the learning problem, we modified the input state representation by rotating all states to a standardized orientation. This meant that from the agent's perspective, they always started in the top-left corner (0,0), with the goal consistently placed at the opposite end of the grid. We hoped this would make the learning task more consistent, but alas, our drones continued to stroll around rather than finding their path.
 
 ### 3. Success Buffer Implementation
-Next came our "success buffer" approach - a specialized replay memory that prioritized storing and resampling successful episodes. The idea was to help our agents learn from their rare victories. This approach finally showed some promise! Our agents started converging... but only in empty environments without any walls. The moment we introduced complexity, they were (mostly) lost again.
+Next came our "success buffer" approach - a specialized replay memory that prioritized storing and resampling successful episodes. The idea was to help our agents learn from their rare victories. This approach finally showed some promise! Our agents started converging... but only in empty environments without any walls. The moment we introduced complexity, they were (mostly) lost again. 
+
+<img src="img/MiniConv.PNG" alt="Goal cells" style="width:700px; display: block; margin: 0 auto"/>
 
 ### 4. Spatial Convolution Mixer
 Growing more ambitious, we redesigned our architecture to use a central state representation with all spatial information encoded as a grid. We added convolutional layers to our mixer network, hoping to capture spatial relationships better. Unfortunately, this sophisticated approach suffered from recurring gradient explosions that we couldn't successfully mitigate. Our beautiful neural network was learning too enthusiastically for its own good!
