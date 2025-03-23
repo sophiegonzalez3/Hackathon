@@ -22,23 +22,36 @@ def sample_config() -> dict[str, int | None]:
 def sample_env() -> MazeEnv:
     config = sample_config()
 
+    # env = MazeEnv(
+    #     size=config.get("grid_size"),
+    #     walls_proportion=config.get("walls_proportion"), 
+    #     num_dynamic_obstacles=config.get("num_dynamic_obstacles"),
+    #     num_agents=config.get("num_agents"),
+    #     communication_range=config.get("communication_range"),
+    #     max_lidar_dist_main=config.get(
+    #         "max_lidar_dist_main"
+    #     ),
+    #     max_lidar_dist_second=config.get(
+    #         "max_lidar_dist_second"
+    #     ),
+    #     max_episode_steps=config.get(
+    #         "max_episode_steps"
+    #     ),
+    #     render_mode=config.get("render_mode", None),
+    #     seed=config.get("seed", None),  # Seed for reproducibility
+    # )
+
     env = MazeEnv(
-        size=config.get("grid_size"),
-        walls_proportion=config.get("walls_proportion"), 
-        num_dynamic_obstacles=config.get("num_dynamic_obstacles"),
-        num_agents=config.get("num_agents"),
-        communication_range=config.get("communication_range"),
-        max_lidar_dist_main=config.get(
-            "max_lidar_dist_main"
-        ),
-        max_lidar_dist_second=config.get(
-            "max_lidar_dist_second"
-        ),
-        max_episode_steps=config.get(
-            "max_episode_steps"
-        ),
-        render_mode=config.get("render_mode", None),
-        seed=config.get("seed", None),  # Seed for reproducibility
+        size=10,
+        walls_proportion=0,
+        num_dynamic_obstacles=0,
+        num_agents=4,
+        communication_range=8,
+        max_lidar_dist_main=5,
+        max_lidar_dist_second=3,
+        max_episode_steps=500,
+        render_mode=None,
+        seed=None
     )
 
     return env

@@ -278,14 +278,14 @@ class ReplayMemory:
             )  # batch_size, num_agents, num_rnn_layers, rnn_hidden_size
 
             # (num_agents, num_rnn_layers, batch_size, rnn_hidden_size)
-            result["actor_hidden_states"] = actor_hidden.permute(1, 2, 0, 3)
+            result["actor_hidden_states"] = actor_hidden.permute(1, 2, 0, 3).contiguous()
 
         if has_critic_hidden:
             # Originally shape: (batch_size, time_steps, num_rnn_layers, 1, rnn_hidden_size)
             critic_hidden = torch.stack(
                 [h[0, :, 0] for h in batch["critic_hidden_states"]]
             )  # batch_size, num_rnn_layers, rnn_hidden_size
-            result["critic_hidden_states"] = critic_hidden.transpose(0, 1)
+            result["critic_hidden_states"] = critic_hidden.transpose(0, 1).contiguous()
 
         return result
 

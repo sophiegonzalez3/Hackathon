@@ -51,6 +51,8 @@ class MappoAgent:
         buffer_size: int,
         sequence_length: int,
         device: torch.device | None,
+        epochs: int,
+        update_frequency: int,
     ) -> None:
         self.num_agents = num_agents
         self.actor = actor
@@ -64,6 +66,9 @@ class MappoAgent:
         self.replaymemory = ReplayMemory(buffer_size, sequence_length, device)
         self.clip_value = clip_value
         self.device = device
+        self.epochs = epochs
+        self.update_frequency = update_frequency
+        self.episode_countdown = 0
 
         self.actor_hidden_states: list[torch.Tensor | None] = [
             None for _ in range(self.num_agents)
@@ -71,6 +76,12 @@ class MappoAgent:
         self.critic_hidden_state: torch.Tensor | None = None
 
         self.current_episode_buffer = EpisodeBuffer()
+
+        self.accumulated_metrics = {
+            "actor_loss": 0.0,
+            "critic_loss": 0.0,
+            "entropy": 0.0,
+        }
 
     def next_episode(self) -> None:
         self.actor_hidden_states = [None for _ in range(self.num_agents)]
@@ -80,6 +91,7 @@ class MappoAgent:
             episode = Episode(self.current_episode_buffer, self.device)
             self.replaymemory.append(episode)
             self.current_episode_buffer.clear()
+            self.episode_countdown += 1
 
     def get_action(
         self,
@@ -124,26 +136,77 @@ class MappoAgent:
             next_central_state,
         )
 
+        should_update = (
+            self.episode_countdown % self.update_frequency == 0
+            and self.episode_countdown > 0)
+
+        if len(self.replaymemory) < 1 or not should_update:
+            return self.accumulated_metrics
+
         if len(self.replaymemory) < 1:
             return {"actor_loss": 0.0, "critic_loss": 0.0, "entropy": 0.0}
 
-        # Sample sequences from replay memory
-        batch = self.replaymemory.sample_sequences(self.batch_size)
+        total_actor_loss = 0.0
+        total_critic_loss = 0.0
+        total_entropy = 0.0
 
-        # Compute returns and advantages
-        returns, advantages = self._compute_returns_and_advantages(batch)
+        # Multiple passes through the replay buffer (epochs)
+        print("\tTRAINING, epoch:", " ")
+        for epoch in range(self.epochs):
+            print(f"{epoch}", end=" ")
+            # Sample sequences from replay memory
+            batch = self.replaymemory.sample_sequences(self.batch_size)
 
-        # Update actor
-        actor_loss, entropy = self._update_actor(batch, advantages)
+            # Compute returns and advantages
+            returns, advantages = self._compute_returns_and_advantages(batch)
 
-        # Update critic
-        critic_loss = self._update_critic(batch, returns)
+            # Update actor
+            actor_loss, entropy = self._update_actor(batch, advantages)
 
-        return {
-            "actor_loss": actor_loss.item(),
-            "critic_loss": critic_loss.item(),
-            "entropy": entropy.item(),
+            # Update critic
+            critic_loss = self._update_critic(batch, returns)
+
+            # Accumulate metrics
+            total_actor_loss += actor_loss.item()
+            total_critic_loss += critic_loss.item()
+            total_entropy += entropy.item()
+        print("")
+        print(f"{total_actor_loss=}, {total_critic_loss=}, {total_entropy=}")
+        self.episode_countdown = 0
+        # Average metrics across epochs
+        avg_actor_loss = total_actor_loss / self.epochs
+        avg_critic_loss = total_critic_loss / self.epochs
+        avg_entropy = total_entropy / self.epochs
+
+        # Reset accumulated metrics after updating
+        self.accumulated_metrics = {
+            "actor_loss": avg_actor_loss,
+            "critic_loss": avg_critic_loss,
+            "entropy": avg_entropy,
+            "epochs": self.epochs,
         }
+
+        return self.accumulated_metrics
+
+        # # Sample sequences from replay memory
+        # batch = self.replaymemory.sample_sequences(self.batch_size)
+
+        # # Compute returns and advantages
+        # returns, advantages = self._compute_returns_and_advantages(batch)
+
+        # # Update actor
+        # actor_loss, entropy = self._update_actor(batch, advantages)
+
+        # # Update critic
+        # critic_loss = self._update_critic(batch, returns)
+
+        # # Reset accumulated metrics after updating
+        # self.accumulated_metrics = {
+        #     "actor_loss": actor_loss.item(),
+        #     "critic_loss": critic_loss.item(),
+        #     "entropy": entropy.item(),
+        # }
+        # return self.accumulated_metrics
 
     def store_transition(
         self,
