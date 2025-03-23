@@ -87,6 +87,24 @@ Considering the problem caracteristics in particular the fact that this is a mul
 
 QMIX is a value-based multi-agent reinforcement learning algorithm designed to handle the challenges of decentralized execution with centralized training. It works by learning individual Q-values for each agent while using a mixing network to combine these values into a joint team Q-value. The beauty of QMIX is its monotonicity constraint - it ensures that if an individual agent's action improves its local Q-value, it also improves the team's Q-value, allowing for decentralized execution.
 
+### 0. Designing the best reward function :
+
+After some trial and error, and some overly sophisticated approach (using astar algo, using penalty for specific action or pattern of action... ) But ultimatly we have settle on a reward function with the following key componant : 
+
+* **Goal Achievement**: A substantial one-time reward (10,000) when an agent reaches the goal area, encouraging completion of the primary objective.
+* **Deactivation Penalty**: A severe penalty (-10,000) when agents collide with obstacles or walls, strongly discouraging unsafe navigation.
+* **Distance-based Guidance**: Several distance metrics help guide agents toward the goal:
+    1. A general distance penalty proportional to Manhattan distance from the goal
+    2. A reward for reducing distance to the goal (making progress)
+    3. A scaled penalty for increasing distance from the goal (moving away)
+
+**Time Management**: A small time penalty (-0.1) per step encourages efficiency and discourages wandering.
+**Anti-laziness Mechanism**: A specific penalty (-0.5) for staying in the same position, preventing agents from getting stuck or remaining idle.
+
+**Team Progress Reward**: When any agent reaches the goal, all active agents receive a bonus reward (5), encouraging team-oriented behavior.
+**Proximity Cooperation**: Agents receive small bonuses (0.3) for staying near other agents within a threshold distance (5.0), promoting swarm cohesion without forcing tight grouping.
+
+All rewards are ultimately normalized by a scaling factor (1000) to keep them in a manageable range for the learning algorithms. 
 
 ### 1. Adding Memory with RNN Layers
 When our initial QMIX implementation failed to converge, we enhanced the agent's architecture with a recurrent neural network (RNN) layer : 1 then 2. The idea was to provide our agents with memory of previous states, which should theoretically help them make better decisions in partially observable environments. Despite this promising approach, our agents still wandered aimlessly, unable to find a reliable path to the goal.
