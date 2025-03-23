@@ -79,7 +79,7 @@ For each step, the agent:
 
 In an other creative strike we developed an LLM-powered agent. The implementation used a detailed prompt describing the agent's surroundings, goal position, and LIDAR readings, enabling our LLMAgent to make informed decisions about movement actions. This approach proved remarkably effective, for smaller smaller config effortlessly solving 10×10 grids even with multiple agents navigating simultaneously. However, this success came with practical drawbacks: API calls introduced significant latency between actions, and the cost implications of frequent API calls made this approach potentially expensive. 
 
-<img src="img/illustrationLLM.png" alt="Goal cells" style="width:700px; display: block; margin: 0 auto"/>
+<img src="img/illustrationLLM.PNG" alt="Goal cells" style="width:700px; display: block; margin: 0 auto"/>
 
 
 ## III. Our Reinforcement Learning Journey**
