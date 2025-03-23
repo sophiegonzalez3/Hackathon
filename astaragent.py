@@ -2,7 +2,7 @@ import heapq
 from collections import defaultdict
 
 import numpy as np
-
+np.random.seed(44)
 
 class MyAgent:
     def __init__(self, num_agents=4):
@@ -30,7 +30,7 @@ class MyAgent:
         # Number of times the same action was repeated
         self.action_repeat_counter = [0] * num_agents
         # Maximum repeat count before trying a random action
-        self.max_repeat_count = 5
+        self.max_repeat_count = 15
         # Memory of dangerous areas (dynamic obstacles)
         self.danger_zones = [{} for _ in range(num_agents)]
         # Initialize obstacle memory (0: unknown, 1: wall, 2: dynamic obstacle, 3: other agent)
@@ -74,7 +74,6 @@ class MyAgent:
         self.goal_positions[agent_idx] = (goal_x, goal_y)
         self.agent_memories[agent_idx][goal_x, goal_y] = 4  # Mark goal
 
-        # Process LIDAR observations for main, right, and left
         self.process_lidar_data(agent_idx, x, y, orientation, state[6:12])
 
         # Process observations from other agents in communication range
@@ -274,7 +273,6 @@ class MyAgent:
                 path.reverse()
                 return path
 
-            # Check all adjacent cells
             for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 neighbor = (current[0] + dx, current[1] + dy)
 
@@ -288,18 +286,15 @@ class MyAgent:
                 # Check if neighbor is traversable
                 if (
                     memory[neighbor] == 1 or memory[neighbor] == 2
-                ):  # Wall or dynamic obstacle
+                ):  
                     continue
 
-                # Check if neighbor is in danger zone (adjacent to dynamic obstacle)
                 if neighbor in self.danger_zones[agent_idx]:
                     continue
 
-                # Calculate tentative g_score
                 tentative_g_score = g_score[current] + 1
 
                 if tentative_g_score < g_score[neighbor]:
-                    # This path to neighbor is better than any previous one
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g_score
                     f_score[neighbor] = tentative_g_score + heuristic(neighbor, goal)
@@ -355,7 +350,6 @@ class MyAgent:
                 ):
                     continue
 
-                # Only avoid known obstacles (walls)
                 if memory[neighbor] == 1:
                     continue
 
@@ -381,8 +375,7 @@ class MyAgent:
                         heapq.heappush(open_set, (f_score[neighbor], neighbor))
                         open_set_hash.add(neighbor)
 
-        # No path found, return a path toward the goal even if it's not optimal
-        return self.greedy_path(start, goal)
+        return self.greedy_path(start, goal) # No path found, return a path toward the goal even if it's not optimal
 
     def greedy_path(self, start, goal):
         """Find a greedy path toward the goal when A* fails."""
@@ -498,8 +491,6 @@ class MyAgent:
                     else:
                         action = 6  # Turn left
                 else:
-                    # We're already facing the right direction, move forward
-                    # Map orientation to appropriate movement action
                     if orientation == 0:  # Facing up
                         action = 1  # Move up
                     elif orientation == 1:  # Facing right
@@ -509,8 +500,7 @@ class MyAgent:
                     elif orientation == 3:  # Facing left
                         action = 3  # Move left
             else:
-                # No valid path or already at goal, stay steady
-                action = 0
+                action = 0 # No valid path
 
             # Check if we're repeating the same action too much
             if action == self.last_actions[agent_idx]:
