@@ -1,7 +1,11 @@
 # Drone Swarm Labyrinth RL: A Week of Exploration
 
 ## I. Deterministic Approch
-Since we didnt have a previous experience with solving this type of game. We endhavour to better understand it. And we re-code a controllable game entirely. Allowing to discover with each agent what they perceive of the grid at each step and learning some usefull infos. Mainly that even if the game looks easy even us human couldn't win most of the times in the harder config. But we decide to have a tried in solving it with a determinist algorithm. Our solution combines 4 key elements:
+Since we didnt have a previous experience with solving this type of game. We endhavour to better understand it. And we re-code a controllable game entirely. Allowing to discover with each agent what they perceive of the grid at each step and learning some usefull infos. Mainly that even if the game looks easy even us human couldn't win most of the times in the harder config. 
+
+<img src="img/illu_game.jpg" alt="Game illustration" style="width:200px; display: block; margin: 0 auto"/> 
+
+But we decide to have a tried in solving it with a determinist algorithm. Our solution combines 4 key elements:
 
 * Memory mapping: Each agent builds its own map of the environment as it explores
 * Collaborative intelligence: Agents share their observations within communication range (ONLY intant t information and ONLY when they are in range)
@@ -68,7 +72,7 @@ For each step, the agent:
 
 => You can find the Notebook implementation called EvaluationAStar.ipynb. Here are the results :
 
-<img src="img/AStarResult.png" alt="Goal cells" style="width:70px; display: block; margin: 0 auto"/> 
+<img src="img/AStarResult.png" alt="A star Results" style="width:600px; display: block; margin: 0 auto"/> 
 
 ## III. Our Reinforcement Learning Journey**
 Considering the problem caracteristics in particular the fact that this is a multi agent envrionement with discrete action space. We choose to explore Qmix strategies.
