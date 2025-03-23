@@ -1,285 +1,453 @@
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 import torch
 import torch.nn.functional as F
-from torch import nn, optim
+from torch import optim
 
-from env import MazeEnv
 from models import ActorNetwork, CriticNetwork
-from replaybuffer import ReplayBuffer
+from replaymemory import Episode, EpisodeBuffer, ReplayMemory
 
 
-MAX_GRID_SIZE = 30
-MAX_NUM_AGENTS = 4
-MAX_NUM_OBSTACLES = 5
-GLOBAL_STATE_SIZE = MAX_GRID_SIZE * MAX_GRID_SIZE + 6 + MAX_NUM_AGENTS * 5 + MAX_NUM_OBSTACLES * 2
+class RandomAgent:
+    def __init__(self, num_agents: int) -> None:
+        self.num_agents = num_agents
+
+    def next_episode(self) -> None:
+        pass
+
+    def get_action(
+        self,
+        agent_state: npt.NDArray[np.float32],  # (num_agents, state_size)
+        evaluation: bool = False,
+    ) -> list[int]:
+        return np.random.randint(0, 7, size=self.num_agents).tolist()
+
+    def update_policy(
+        self,
+        agent_state: npt.NDArray[np.float32],  # (num_agents, state_size)
+        agent_action: list[int],  # (num_agents,)
+        rewards: npt.NDArray[np.float32],  # (num_agents,)
+        agent_next_state: npt.NDArray[np.float32],  # (num_agents, state_size)
+        done: bool,
+        central_state: npt.NDArray[np.float32],  # (central_state_size,)
+        next_central_state: npt.NDArray[np.float32],  # (central_state_size,)
+    ) -> dict[str, Any]:
+        pass
 
 
-def extract_global_state(env: MazeEnv) -> np.ndarray:
-    parameters = np.array([
-        env.grid_size,
-        env.communication_range,
-        env.max_lidar_dist_main,
-        env.max_lidar_dist_second,
-        env.num_dynamic_obstacles,
-        env.walls_proportion,
-    ])
-    positions = np.hstack(env.agent_positions)
-    lidar_orientations = np.hstack(env.lidar_orientation)
-    evacuated_agents = np.array([int(agent_id in env.evacuated_agents) for agent_id in range(env.num_agents)])
-    deactivated_agents = np.array([int(agent_id in env.evacuated_agents) for agent_id in range(env.num_agents)])
-    
-    grid = env.grid
-    full_grid = np.ones((MAX_GRID_SIZE, MAX_GRID_SIZE), dtype=np.float32)
-    full_grid[:env.grid_size, :env.grid_size] = grid
-    full_grid = full_grid.flatten()
-    
-    obstacles = -np.ones(2 * MAX_NUM_OBSTACLES)
-    for i, obstacle in enumerate(env.dynamic_obstacles):
-        obstacles[2*i] = obstacle[0]
-        obstacles[2*i+1] = obstacle[1]
-    
-    return np.hstack((parameters, positions,lidar_orientations, evacuated_agents, deactivated_agents, obstacles, full_grid))
-
-
-class MyAgent:
+class MappoAgent:
     def __init__(
         self,
         num_agents: int,
-        device: torch.device,
-        actor_net: ActorNetwork,
-        actor_optim: optim.Optimizer,
-        critic_net: CriticNetwork,
-        critic_optim: optim.Optimizer,
-    ):
+        actor: ActorNetwork,
+        actor_optimizer: optim.Optimizer,
+        critic: CriticNetwork,
+        critic_optimizer: optim.Optimizer,
+        gamma: float,
+        clip_value: float,
+        batch_size: int,
+        buffer_size: int,
+        sequence_length: int,
+        device: torch.device | None,
+    ) -> None:
         self.num_agents = num_agents
-        self.state_size = state_size
-        self.grid_size = grid_size
-        self.action_size = action_size
+        self.actor = actor
+        self.actor_optimizer = actor_optimizer
+        self.critic = critic
+        self.critic_optimizer = critic_optimizer
         self.gamma = gamma
-        self.gae_lambda = gae_lambda
-        self.clip_param = clip_param
-        self.entropy_coef = entropy_coef
-        self.value_loss_coef = value_loss_coef
-        self.max_grad_norm = max_grad_norm
         self.batch_size = batch_size
-        self.update_epochs = update_epochs
+        self.buffer_size = buffer_size
+        self.sequence_length = sequence_length
+        self.replaymemory = ReplayMemory(buffer_size, sequence_length, device)
+        self.clip_value = clip_value
+        self.device = device
 
-        # Set device
-        self.device = device if device else (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
-        print(f"Using device: {self.device}")
+        self.actor_hidden_states: list[torch.Tensor | None] = [
+            None for _ in range(self.num_agents)
+        ]
+        self.critic_hidden_state: torch.Tensor | None = None
 
-        self.actor_net = actor_net
-        self.critic_net = critic_net
-        
-        # Set up optimizers
-        self.optimizer_actor = optim.Adam(self.actor.parameters(), lr=lr_actor)
-        self.optimizer_critic = optim.Adam(self.critic.parameters(), lr=lr_critic)
+        self.current_episode_buffer = EpisodeBuffer()
 
-        # Initialize replay buffer
-        self.memory = ReplayBuffer(buffer_size, num_agents)
+    def next_episode(self) -> None:
+        self.actor_hidden_states = [None for _ in range(self.num_agents)]
+        self.critic_hidden_state = None
 
-        # Hidden states for actors
-        self.hidden_states = [None for _ in range(num_agents)]
+        if not self.current_episode_buffer.is_empty():
+            episode = Episode(self.current_episode_buffer, self.device)
+            self.replaymemory.append(episode)
+            self.current_episode_buffer.clear()
 
-        # Training metrics
-        self.actor_losses = []
-        self.critic_losses = []
-        self.entropies = []
-
-    def preprocess_state(self, state):
-        if not isinstance(state, torch.Tensor):
-            state = torch.FloatTensor(state).to(self.device)
-        return state
-
-    def get_action(self, states, evaluation=False):
-        with torch.no_grad():
-            actions = []
-            action_log_probs = []
-            entropies = []
-
-            # Process each agent's state
-            for i, state in enumerate(states):
-                # Skip deactivated or evacuated agents
-                if np.all(state[:2] == -1):  # Check if agent is inactive
-                    actions.append(0)  # Default action
-                    action_log_probs.append(0)
-                    entropies.append(0)
-                    continue
-
-                state_tensor = self.preprocess_state(state).unsqueeze(0)  # Add batch dimension
-
-                action, action_log_prob, entropy, self.hidden_states[i] = self.actor.get_action(
-                    state_tensor, 
-                    self.hidden_states[i],
-                    deterministic=evaluation
+    def get_action(
+        self,
+        agent_state: npt.NDArray[np.float32],  # (num_agents, state_size)
+        evaluation: bool = False,
+    ) -> list[int]:
+        # agent_state is (num_agents, state_size)
+        actions = []
+        for agent_id, state in enumerate(agent_state):
+            state_tensor = (
+                torch.from_numpy(state).to(self.device).view(1, 1, -1)
+            )  # (batch_size, sequence_length, state_size)
+            action_tensor, _, self.actor_hidden_states[agent_id] = (
+                self.actor.get_action(
+                    state_tensor,
+                    self.actor_hidden_states[agent_id],
+                    deterministic=evaluation,
                 )
+            )
+            # action_tensor is (batch_size, sequence_length)
+            action = action_tensor.squeeze().cpu().item()
+            actions.append(action)
+        return actions
 
-                actions.append(action.item())
-                action_log_probs.append(action_log_prob.item())
-                entropies.append(entropy.item())
-
-            return actions, action_log_probs, entropies
-
-    def update_policy(self, states, actions, rewards, next_states, done, env):
-        global_state = self.critic.extract_global_state(env)
-
-        with torch.no_grad():
-            value = self.critic(global_state).squeeze().numpy()
-
-        self.memory.store_transition(
-            states=states,
-            actions=actions,
-            action_log_probs=self.actor_log_probs if hasattr(self, 'actor_log_probs') else None,
-            rewards=rewards,
-            next_states=next_states,
-            dones=done,
-            values=value
+    def update_policy(
+        self,
+        agent_state: npt.NDArray[np.float32],  # (num_agents, state_size)
+        agent_action: list[int],  # (num_agents,)
+        rewards: npt.NDArray[np.float32],  # (num_agents,)
+        agent_next_state: npt.NDArray[np.float32],  # (num_agents, state_size)
+        done: bool,
+        central_state: npt.NDArray[np.float32],  # (central_state_size,)
+        next_central_state: npt.NDArray[np.float32],  # (central_state_size,)
+    ) -> dict[str, Any]:
+        self.store_transition(
+            agent_state,
+            agent_action,
+            rewards,
+            agent_next_state,
+            done,
+            central_state,
+            next_central_state,
         )
 
-        if done:
-            self.memory.end_trajectory(compute_advantages=True, gamma=self.gamma, lambda_=self.gae_lambda)
+        if len(self.replaymemory) < 1:
+            return {"actor_loss": 0.0, "critic_loss": 0.0, "entropy": 0.0}
 
-            if len(self.memory) >= self.batch_size:
-                self._update_networks()
-                return True
+        # Sample sequences from replay memory
+        batch = self.replaymemory.sample_sequences(self.batch_size)
 
-        self.actor_log_probs = self.current_log_probs if hasattr(self, 'current_log_probs') else None
-
-        return False
-
-    def _update_networks(self):
-        """Update actor and critic networks using collected trajectories"""
-        # Sample trajectories from buffer
-        trajectories = self.memory.sample(self.batch_size)
-
-        for _ in range(self.update_epochs):
-            # Process each trajectory
-            for trajectory in trajectories:
-                self._update_from_trajectory(trajectory)
-
-        # Clear memory after update
-        self.memory.clear()
-
-    def _update_from_trajectory(self, trajectory):
-        """Update networks from a single trajectory"""
-        # Extract data from trajectory
-        states_batch = []
-        actions_batch = []
-        old_log_probs_batch = []
-        returns_batch = []
-        advantages_batch = []
-        global_states_batch = []
-
-        for transition in trajectory:
-            states_batch.append(transition['states'])
-            actions_batch.append(transition['actions'])
-            if transition['action_log_probs'] is not None:
-                old_log_probs_batch.append(transition['action_log_probs'])
-            returns_batch.append(transition['returns'] if 'returns' in transition else transition['advantages'] + transition['values'])
-            advantages_batch.append(transition['advantages'])
-
-            # We need to recalculate global states since they weren't stored
-            # This would typically be done with the environment, but for now we'll skip it
-            # global_states_batch.append(self.critic.extract_global_state(env))
-
-        # Convert to tensors
-        states_batch = [torch.FloatTensor(np.array(states)).to(self.device) for states in zip(*states_batch)]
-        actions_batch = torch.LongTensor(actions_batch).to(self.device)
-        if old_log_probs_batch:
-            old_log_probs_batch = torch.FloatTensor(old_log_probs_batch).to(self.device)
-        returns_batch = torch.FloatTensor(returns_batch).to(self.device)
-        advantages_batch = torch.FloatTensor(advantages_batch).to(self.device)
-
-        # Normalize advantages
-        advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
-        # Update critic
-        critic_loss = self._update_critic(returns_batch, global_states_batch)
+        # Compute returns and advantages
+        returns, advantages = self._compute_returns_and_advantages(batch)
 
         # Update actor
-        actor_loss, entropy = self._update_actor(states_batch, actions_batch, old_log_probs_batch, advantages_batch)
+        actor_loss, entropy = self._update_actor(batch, advantages)
 
-        # Record metrics
-        self.actor_losses.append(actor_loss)
-        self.critic_losses.append(critic_loss)
-        self.entropies.append(entropy)
+        # Update critic
+        critic_loss = self._update_critic(batch, returns)
 
-    def _update_actor(self, states, actions, old_log_probs, advantages):
-        """Update actor network"""
-        total_actor_loss = 0
-        total_entropy = 0
+        return {
+            "actor_loss": actor_loss.item(),
+            "critic_loss": critic_loss.item(),
+            "entropy": entropy.item(),
+        }
 
-        # Process each agent's data
-        for agent_idx in range(self.num_agents):
-            # Get current agent's data
-            agent_states = states[agent_idx]
-            agent_actions = actions[:, agent_idx]
-            agent_old_log_probs = old_log_probs[:, agent_idx] if old_log_probs is not None else None
-            agent_advantages = advantages[:, agent_idx]
+    def store_transition(
+        self,
+        agent_state: npt.NDArray[np.float32],  # (num_agents, state_size)
+        agent_action: list[int],  # (num_agents,)
+        rewards: npt.NDArray[np.float32],  # (num_agents,)
+        agent_next_state: npt.NDArray[np.float32],  # (num_agents, state_size)
+        done: bool,
+        central_state: npt.NDArray[np.float32],  # (central_state_size,)
+        next_central_state: npt.NDArray[np.float32],  # (central_state_size,)
+    ) -> None:
+        self.current_episode_buffer.append(
+            agent_state=agent_state,
+            action=agent_action,
+            central_state=central_state,
+            reward=rewards,
+            done=np.array([done] * self.num_agents),
+            actor_hidden_state=np.array(
+                [
+                    hs.detach().cpu().numpy()
+                    if hs is not None
+                    else np.zeros(
+                        (self.actor.rnn_num_layers, 1, self.actor.rnn_hidden_size)
+                    )
+                    for hs in self.actor_hidden_states
+                ]
+            ),
+            critic_hidden_state=self.critic_hidden_state.detach().cpu().numpy()
+            if self.critic_hidden_state is not None
+            else np.zeros((self.critic.rnn_num_layers, 1, self.critic.rnn_hidden_size)),
+        )
 
-            # Forward pass to get new action distribution
-            action_probs, _ = self.actor(agent_states)
-            dist = torch.distributions.Categorical(action_probs)
-            new_log_probs = dist.log_prob(agent_actions)
-            entropy = dist.entropy().mean()
+    def _compute_returns_and_advantages(
+        self, batch: dict[str, torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute returns and advantages for the sampled batch."""
+        # Get batch components
+        central_states = batch[
+            "central_states"
+        ]  # (batch_size, seq_len, central_state_size)
+        agent_states = batch[
+            "agent_states"
+        ]  # (batch_size, seq_len, num_agents, agent_state_size)
+        actions = batch["actions"]  # (batch_size, seq_len, num_agents)
+        rewards = batch["rewards"]  # (batch_size, seq_len, num_agents)
+        dones = batch["dones"]  # (batch_size, seq_len, num_agents)
+        sequence_lengths = batch["sequence_lengths"]  # (batch_size)
 
-            # Compute policy loss with clipping
-            if agent_old_log_probs is not None:
-                ratio = torch.exp(new_log_probs - agent_old_log_probs)
-                surr1 = ratio * agent_advantages
-                surr2 = torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * agent_advantages
-                actor_loss = -torch.min(surr1, surr2).mean()
+        batch_size = central_states.shape[0]
+        seq_len = central_states.shape[1]
+
+        # Initialize critic hidden state
+        critic_hidden = None
+        if "critic_hidden_states" in batch:
+            # (rnn_num_layers, batch_size, rnn_hidden_size)
+            critic_hidden = batch["critic_hidden_states"]
+
+        # Compute values for all states in the batch
+        values = []
+        for t in range(seq_len):
+            value_t, critic_hidden = self.critic(
+                central_states[:, t : t + 1],
+                agent_states[:, t : t + 1],
+                actions[:, t : t + 1],
+                critic_hidden,
+            )
+            values.append(value_t)
+
+        # Concatenate values over time dimension
+        values = torch.cat(values, dim=1)  # (batch_size, seq_len, 1)
+
+        # Create mask based on sequence lengths
+        mask = torch.zeros((batch_size, seq_len), device=self.device)
+        for i, length in enumerate(sequence_lengths):
+            mask[i, :length] = 1.0
+
+        # Compute returns and advantages
+        returns = torch.zeros_like(values)
+        advantages = torch.zeros_like(values)
+
+        # For each sequence in the batch
+        for b in range(batch_size):
+            length = sequence_lengths[b].item()
+
+            # Get the value estimate for the last state
+            # If the sequence ends with a terminal state (done=1), use 0
+            # Otherwise, bootstrap from the estimated value
+            last_state_done = dones[b, length - 1, 0].item()
+
+            if last_state_done:
+                # If terminal state, initialize with 0
+                R = torch.zeros(1, device=self.device)
             else:
-                # If we don't have old log probs, just use the new ones
-                actor_loss = -(new_log_probs * agent_advantages).mean()
+                # If non-terminal, bootstrap from the value estimate
+                # We use the last available value estimate
+                R = values[b, length - 1].clone().detach()
 
-            # Add entropy bonus
-            actor_loss = actor_loss - self.entropy_coef * entropy
+            # Compute returns backward in time
+            for t in reversed(range(length)):
+                # Use mean reward across agents for global return calculation
+                mean_reward = rewards[b, t].mean().unsqueeze(0)
+                done = dones[b, t, 0].unsqueeze(0)
 
-            # Backprop and optimize
-            self.optimizer_actor.zero_grad()
-            actor_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-            self.optimizer_actor.step()
+                # For the last step, we've already initialized R appropriately
+                if t < length - 1:
+                    R = mean_reward + self.gamma * R * (1 - done)
+                else:
+                    # For the last step, only use reward if terminal, otherwise already bootstrapped
+                    if done.item() > 0:
+                        R = mean_reward
 
-            total_actor_loss += actor_loss.item()
-            total_entropy += entropy.item()
+                returns[b, t] = R
 
-        return total_actor_loss / self.num_agents, total_entropy / self.num_agents
+            # Compute advantages
+            advantages[b, :length] = returns[b, :length] - values[b, :length]
 
-    def _update_critic(self, returns, global_states):
-        """Update critic network"""
-        # Since we're using a centralized critic, we need global states
-        # For now, let's assume we have them
-        if not global_states:
-            return 0.0
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        total_value_loss = 0
+        return returns, advantages
 
-        for returns_batch, global_state in zip(returns, global_states):
-            # Forward pass to get value prediction
-            values = self.critic(global_state)
+    def _update_actor(
+        self, batch: dict[str, torch.Tensor], advantages: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Update the actor network."""
+        # Get batch components
+        agent_states = batch[
+            "agent_states"
+        ]  # (batch_size, seq_len, num_agents, agent_state_size)
+        actions = batch["actions"]  # (batch_size, seq_len, num_agents)
+        sequence_lengths = batch["sequence_lengths"]  # (batch_size)
 
-            # Compute value loss
-            value_loss = self.value_loss_coef * F.mse_loss(values, returns_batch.unsqueeze(1))
+        batch_size = agent_states.shape[0]
+        seq_len = agent_states.shape[1]
 
-            # Backprop and optimize
-            self.optimizer_critic.zero_grad()
-            value_loss.backward()
-            nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
-            self.optimizer_critic.step()
+        # Initialize zero loss and entropy
+        policy_loss = 0
+        entropy_loss = 0
+        total_samples = 0
 
-            total_value_loss += value_loss.item()
+        # Update each agent's policy separately
+        for agent_id in range(self.num_agents):
+            # Get agent-specific data
+            agent_states_i = agent_states[
+                :, :, agent_id
+            ]  # (batch_size, seq_len, agent_state_size)
+            actions_i = actions[:, :, agent_id].long()  # (batch_size, seq_len)
+            advantages_i = advantages[:, :, 0]  # (batch_size, seq_len)
 
-        return total_value_loss / len(global_states) if global_states else 0.0
+            # Sample old action log probabilities
+            actor_hidden = None
+            if "actor_hidden_states" in batch:
+                actor_hidden = batch["actor_hidden_states"][agent_id]
 
-    def new_episode(self):
-        """Reset agent state for a new episode"""
-        # Reset hidden states
-        self.hidden_states = [None for _ in range(self.num_agents)]
+            # Get log probabilities and entropy
+            old_log_probs = []
+            for t in range(seq_len):
+                log_prob_t, _, actor_hidden = self.actor.evaluate_action(
+                    agent_states_i[:, t : t + 1],  # (batch_size, 1, agent_state_size)
+                    actor_hidden,
+                    actions_i[:, t : t + 1],  # (batch_size, 1)
+                )
+                old_log_probs.append(log_prob_t)
 
-        # End current trajectory if any
-        self.memory.end_trajectory()
+            # Concatenate log probs over time dimension
+            old_log_probs = torch.cat(old_log_probs, dim=1)  # (batch_size, seq_len)
 
-        # Reset current log probs
-        if hasattr(self, 'actor_log_probs'):
-            del self.actor_log_probs
+            # Detach old log probs to avoid computing gradients through them
+            old_log_probs = old_log_probs.detach()
+
+            # Compute new log probabilities and entropy
+            actor_hidden = None
+            if "actor_hidden_states" in batch:
+                actor_hidden = batch["actor_hidden_states"][agent_id]
+
+            log_probs = []
+            entropy_total = 0
+            for t in range(seq_len):
+                log_prob_t, entropy_t, actor_hidden = self.actor.evaluate_action(
+                    agent_states_i[:, t : t + 1],  # (batch_size, 1, agent_state_size)
+                    actor_hidden,
+                    actions_i[:, t : t + 1],  # (batch_size, 1)
+                )
+                log_probs.append(log_prob_t)
+                entropy_total += entropy_t
+
+            # Concatenate log probs over time dimension
+            log_probs = torch.cat(log_probs, dim=1)  # (batch_size, seq_len)
+
+            # Create mask for valid sequence parts
+            mask = torch.zeros((batch_size, seq_len), device=self.device)
+            for i, length in enumerate(sequence_lengths):
+                mask[i, :length] = 1.0
+
+            # Compute the ratio of new and old action probabilities
+            ratio = torch.exp(log_probs - old_log_probs)
+
+            # Compute surrogate objectives
+            surr1 = ratio * advantages_i
+            surr2 = (
+                torch.clamp(ratio, 1.0 - self.clip_value, 1.0 + self.clip_value)
+                * advantages_i
+            )
+
+            # Calculate the actor loss using the PPO clip objective
+            agent_loss = -torch.min(surr1, surr2) * mask
+
+            # Sum over valid sequence parts
+            valid_samples = mask.sum()
+            if valid_samples > 0:
+                policy_loss += agent_loss.sum() / valid_samples
+                entropy_loss += entropy_total / valid_samples
+
+            total_samples += 1
+
+        # Average loss across agents
+        if total_samples > 0:
+            policy_loss /= total_samples
+            entropy_loss /= total_samples
+
+        # Update actor network
+        self.actor_optimizer.zero_grad()
+        total_loss = policy_loss - 0.01 * entropy_loss  # Entropy bonus
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
+        self.actor_optimizer.step()
+
+        return policy_loss, entropy_loss
+
+    def _update_critic(
+        self, batch: dict[str, torch.Tensor], returns: torch.Tensor
+    ) -> torch.Tensor:
+        """Update the critic network."""
+        # Get batch components
+        central_states = batch[
+            "central_states"
+        ]  # (batch_size, seq_len, central_state_size)
+        agent_states = batch[
+            "agent_states"
+        ]  # (batch_size, seq_len, num_agents, agent_state_size)
+        actions = batch["actions"]  # (batch_size, seq_len, num_agents)
+        sequence_lengths = batch["sequence_lengths"]  # (batch_size)
+
+        batch_size = central_states.shape[0]
+        seq_len = central_states.shape[1]
+
+        # Initialize critic hidden state
+        critic_hidden = None
+        if "critic_hidden_states" in batch:
+            critic_hidden = batch["critic_hidden_states"]
+
+        # Compute predicted values
+        values = []
+        for t in range(seq_len):
+            value_t, critic_hidden = self.critic(
+                central_states[:, t : t + 1],  # (batch_size, 1, central_state_size)
+                agent_states[
+                    :, t : t + 1
+                ],  # (batch_size, 1, num_agents, agent_state_size)
+                actions[:, t : t + 1],  # (batch_size, 1, num_agents)
+                critic_hidden,
+            )
+            values.append(value_t)
+
+        # Concatenate values over time dimension
+        values = torch.cat(values, dim=1)  # (batch_size, seq_len, 1)
+
+        # Create mask for valid sequence parts
+        mask = torch.zeros((batch_size, seq_len, 1), device=self.device)
+        for i, length in enumerate(sequence_lengths):
+            mask[i, :length] = 1.0
+
+        # Calculate the number of valid entries
+        num_valid = mask.sum()
+
+        # Normalize returns - only consider valid parts of sequences
+        if num_valid > 0:
+            # Compute mean and std of returns where mask is 1
+            masked_returns = returns * mask
+            returns_mean = masked_returns.sum() / num_valid
+            returns_var = (
+                ((masked_returns - returns_mean) ** 2) * mask
+            ).sum() / num_valid
+            returns_std = torch.sqrt(
+                returns_var + 1e-8
+            )  # Add small epsilon for numerical stability
+
+            # Normalize returns
+            normalized_returns = (returns - returns_mean) / returns_std
+
+            # Apply normalization for critic loss computation
+            critic_loss = (
+                F.mse_loss(
+                    (values * mask), (normalized_returns * mask), reduction="sum"
+                )
+                / num_valid
+            )
+        else:
+            critic_loss = torch.tensor(0.0, device=self.device)
+
+        # Update critic network
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
+        self.critic_optimizer.step()
+
+        return critic_loss

@@ -1,133 +1,196 @@
 import torch
-import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Categorical
 
 
 class ActorNetwork(nn.Module):
-    def __init__(self, state_size, hidden_size, action_size, num_rnn_layers=1):
+    def __init__(
+        self,
+        state_size: int = 42,
+        action_size: int = 7,
+        hidden_size: int = 128,
+        rnn_hidden_size: int = 128,
+        rnn_num_layers: int = 1,
+        device: torch.device | None = None,
+    ) -> None:
         super().__init__()
-        self.input_size = state_size
-        self.hidden_size = hidden_size
-        self.action_size = action_size
-        self.rnn_layers = num_rnn_layers
 
-        self.feature_extraction = nn.Sequential(
+        self.state_size = state_size
+        self.action_size = action_size
+        self.hidden_size = hidden_size
+        self.rnn_hidden_size = rnn_hidden_size
+        self.rnn_num_layers = rnn_num_layers
+
+        self.device = device
+
+        self.feature_layer = nn.Sequential(
             nn.Linear(state_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU()
-        )
-
-        self.gru = nn.GRU(
-            input_size=hidden_size,
-            hidden_size=hidden_size,
-            num_layers=num_rnn_layers,
-            batch_first=True
-        )
-
-        self.output_layer = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_size, action_size)
+        )
+        self.rnn = nn.GRU(
+            input_size=hidden_size,
+            hidden_size=rnn_hidden_size,
+            num_layers=rnn_num_layers,
+            batch_first=True,
+        )
+        self.output_layer = nn.Linear(rnn_hidden_size, action_size)
+
+    def init_hidden(self, batch_size: int) -> torch.Tensor:
+        return torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(
+            self.device
         )
 
     def forward(
-        self, x: torch.Tensor, hidden_state: torch.Tensor | None=None
+        self, state: torch.Tensor, hidden_state: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        batch_size = x.size(0)
-        seq_length = x.size(1)
-
-        x = x.view(batch_size * seq_length, -1)
-        features = self.feature_extraction(x)
-        features = features.view(batch_size, seq_length, -1)
+        # state: (batch_size, seq_len, state_size)
+        # hidden_state: (rnn_num_layers, batch_size, rnn_hidden_size)
+        batch_size = state.size(0)
+        features = self.feature_layer(state)  # (batch_size, seq_len, hidden_size)
 
         if hidden_state is None:
-            hidden_state = torch.zeros(self.rnn_layers, batch_size, self.hidden_size, device=x.device)
+            hidden_state = self.init_hidden(
+                batch_size
+            )  # (rnn_num_layers, batch_size, rnn_hidden_size)
 
-        output, hidden_state = self.gru(features, hidden_state)
+        x, hidden_state = self.rnn(features, hidden_state)
+        # x: (batch_size, seq_len, rnn_hidden_size)
+        # hidden_state: (rnn_num_layers, batch_size, rnn_hidden_size)
 
-        output = output.reshape(batch_size * seq_length, -1)
-        action_logits = self.output_layer(output)
-        action_logits = action_logits.view(batch_size, seq_length, -1)
+        logits = self.output_layer(x)  # (batch_size, seq_len, action_size)
 
-        action_probs = F.softmax(action_logits, dim=-1)
-        return action_probs, hidden_state
+        return logits, hidden_state
 
     def get_action(
         self,
         state: torch.Tensor,
         hidden_state: torch.Tensor | None = None,
         deterministic: bool = False,
-    ):
-        action_probs, hidden_state = self.forward(state, hidden_state)
-
-        dist = Categorical(action_probs)
-
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # state: (batch_size, seq_len, state_size)
+        # hidden_state: (rnn_num_layers, batch_size, rnn_hidden_size)
+        action_logits, new_hidden = self(state, hidden_state)
+        dist = Categorical(logits=action_logits)
         if deterministic:
-            action = action_probs.argmax(dim=-1)
+            actions = action_logits.argmax(dim=-1)
         else:
-            action = dist.sample()
+            actions = dist.sample()
+        action_log_prob = dist.log_prob(actions)
+        return actions, action_log_prob, new_hidden
 
+    def evaluate_action(
+        self,
+        state: torch.Tensor,
+        hidden_state: torch.Tensor | None,
+        action: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # state: (batch_size, seq_len, state_size)
+        # hidden_state: (rnn_num_layers, batch_size, rnn_hidden_size)
+        # action: (batch_size, seq_len, 1)
+        logits, new_hidden = self.forward(state, hidden_state)
+        dist = Categorical(logits=logits)
         action_log_prob = dist.log_prob(action)
-        entropy = dist.entropy()
-
-        return action, action_log_prob, entropy, hidden_state
+        dist_entropy = dist.entropy().mean()
+        return action_log_prob, dist_entropy, new_hidden
 
 
 class CriticNetwork(nn.Module):
-    def __init__(self, state_dim, agent_obs_dim, agent_action_dim, hidden_dim=64):
+    def __init__(
+        self,
+        central_state_size: int,
+        num_agents: int = 4,
+        agent_state_size: int = 42,
+        agent_action_size: int = 7,
+        hidden_size: int = 128,
+        rnn_hidden_size: int = 128,
+        rnn_num_layers: int = 1,
+        device: torch.device | None = None,
+    ) -> None:
         super().__init__()
 
-        # Global state encoder
-        self.global_encoder = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU()
-        )
+        self.central_state_size = central_state_size
+        self.num_agents = num_agents
+        self.agent_state_size = agent_state_size
+        self.agent_action_size = agent_action_size
+        self.hidden_size = hidden_size
+        self.rnn_hidden_size = rnn_hidden_size
+        self.rnn_num_layers = rnn_num_layers
+        self.device = device
 
-        # Agent encoder (processes each agent's observation and action)
-        self.agent_encoder = nn.Sequential(
-            nn.Linear(agent_obs_dim + agent_action_dim, hidden_dim),
-            nn.ReLU()
-        )
-
-        # Multi-head attention for agent interactions
-        self.attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=4)
-
-        # Value head
-        self.value_head = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
+        self.central_encoder = nn.Sequential(
+            nn.Linear(central_state_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
         )
 
-    def forward(self, global_state, agent_obs, agent_actions):
-        batch_size = global_state.shape[0]
-        n_agents = agent_obs.shape[1]
+        self.agent_encoder = nn.Sequential(
+            nn.Linear(num_agents * (agent_state_size + 1), hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+        )
 
-        # Encode global state
-        global_features = self.global_encoder(global_state)  # [batch_size, hidden_dim]
+        self.rnn = nn.GRU(
+            input_size=2 * hidden_size,
+            hidden_size=rnn_hidden_size,
+            num_layers=rnn_num_layers,
+            batch_first=True,
+        )
+
+        self.output_layer = nn.Sequential(
+            nn.Linear(rnn_hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 1),
+        )
+
+    def init_hidden(self, batch_size: int = 1) -> torch.Tensor:
+        return torch.zeros(self.rnn_num_layers, batch_size, self.rnn_hidden_size).to(
+            self.device
+        )
+
+    def forward(
+        self,
+        central_state: torch.Tensor,
+        agent_state: torch.Tensor,
+        agent_action: torch.Tensor,
+        hidden_state_p: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        # central_state: (batch_size, seq_len, central_state_size)
+        # agent_state: (batch_size, seq_len, num_agents, agent_state_size)
+        # agent_action: (batch_size, seq_len, num_agents)
+        # hidden_state: (rnn_num_layers, batch_size, rnn_hidden_size)
+
+        batch_size = central_state.shape[0]
+        seq_len = central_state.shape[1]
+
+        central_features = self.central_encoder(
+            central_state
+        )  # (batch_size, seq_len, hidden_size)
 
         # Combine each agent's observation and action, then encode
-        agent_inputs = torch.cat([agent_obs, agent_actions], dim=2)  # [batch_size, n_agents, obs_dim+action_dim]
-        agent_features = self.agent_encoder(agent_inputs)  # [batch_size, n_agents, hidden_dim]
+        agent_inputs = torch.cat([agent_state, agent_action.unsqueeze(3)], dim=3).view(
+            batch_size, seq_len, self.num_agents * (self.agent_state_size + 1)
+        )  # (batch_size, seq_len, num_agents * (state_size + 1))
+        agent_features = self.agent_encoder(
+            agent_inputs
+        )  # (batch_size, seq_len, hidden_size)
 
-        # Reshape for attention: [sequence_length, batch_size, hidden_dim]
-        agent_features_t = agent_features.transpose(0, 1)
+        features = torch.cat(
+            [central_features, agent_features], dim=2
+        )  # (batch_size, seq_len, 2*hidden_size)
 
-        # Apply self-attention across agents
-        attn_output, _ = self.attention(
-            agent_features_t, agent_features_t, agent_features_t
-        )
+        hidden_state = (
+            self.init_hidden(batch_size) if hidden_state_p is None else hidden_state_p
+        )  # (rnn_num_layers, batch_size, rnn_hidden_size)
 
-        # Average agent representations after attention
-        attn_output = attn_output.transpose(0, 1)  # [batch_size, n_agents, hidden_dim]
-        agent_embedding = attn_output.mean(dim=1)  # [batch_size, hidden_dim]
+        x, hidden_state = self.rnn(features, hidden_state)
+        # x: (batch_size, seq_len, rnn_hidden_size)
+        # hidden_state: (rnn_num_layers, batch_size, rnn_hidden_size)
 
-        # Combine global and agent information
-        combined = torch.cat([global_features, agent_embedding], dim=1)
+        value = self.output_layer(x)
+        # value: (batch_size, seq_len, 1)
 
-        # Compute value
-        value = self.value_head(combined)
-
-        return value
+        return value, hidden_state
